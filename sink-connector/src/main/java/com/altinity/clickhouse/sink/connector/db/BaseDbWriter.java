@@ -100,6 +100,8 @@ public class BaseDbWriter {
             Properties properties = new Properties();
             properties.setProperty("client_name", clientName);
             properties.setProperty("custom_settings", "insert_allow_materialized_columns=1");
+            properties.setProperty("custom_settings", "async_insert=1");
+            properties.setProperty("custom_settings", "wait_for_async_insert=0");
 
             if(!jdbcParams.isEmpty()) {
                 log.info("**** JDBC PARAMS from configuration:" + jdbcParams);
