@@ -98,6 +98,12 @@ public class DBMetadata {
         REPLICATED_REPLACING_MERGE_TREE("ReplicatedReplacingMergeTree"),
 
         /**
+         * SharedReplacingMergeTree engine for ClickHouse tables.
+         * A shared version of the ReplacingMergeTree engine.
+         */
+        SHARED_REPLACING_MERGE_TREE("SharedReplacingMergeTree"),
+
+        /**
          * MergeTree engine for ClickHouse tables.
          * The most commonly used engine for tables with sorted data.
          */
@@ -273,6 +279,13 @@ public class DBMetadata {
     public static final String REPLICATED_REPLACING_MERGE_TREE_VER_PREFIX = "ReplicatedReplacingMergeTree(";
 
     /**
+     * Constant prefix for the version column in the SharedReplacingMergeTree engine.
+     * This prefix is used to identify the version column in the table schema for the
+     * SharedReplacingMergeTree engine.
+     * */
+    public static final String SHARED_REPLACING_MERGE_TREE_VER_PREFIX = "SharedReplacingMergeTree(";
+
+    /**
      * Extracts the sign column name for the CollapsingMergeTree engine from the
      * CREATE DML statement.
      *
@@ -301,7 +314,17 @@ public class DBMetadata {
     public String getVersionColumnForReplacingMergeTree(String createDML) {
         String versionColumn = "ver";
 
-        if (createDML.contains(TABLE_ENGINE.REPLICATED_REPLACING_MERGE_TREE.getEngine())) {
+        if (createDML.contains(TABLE_ENGINE.SHARED_REPLACING_MERGE_TREE.getEngine())) {
+            String parameters = StringUtils.substringBetween(createDML, SHARED_REPLACING_MERGE_TREE_VER_PREFIX, ")");
+            if(parameters != null) {
+                String[] parameterArray = parameters.split(",");
+                if(parameterArray.length == 3) {
+                    versionColumn = parameterArray[2].trim();
+                } else if(parameterArray.length == 4) {
+                    versionColumn = parameterArray[2].trim() + "," + parameterArray[3].trim();
+                }
+            }
+        } else if (createDML.contains(TABLE_ENGINE.REPLICATED_REPLACING_MERGE_TREE.getEngine())) {
             String parameters = StringUtils.substringBetween(createDML, REPLICATED_REPLACING_MERGE_TREE_VER_PREFIX, ")");
             if (parameters != null) {
                 String[] parameterArray = parameters.split(",");
@@ -376,6 +399,9 @@ public class DBMetadata {
         if (response.contains(TABLE_ENGINE.COLLAPSING_MERGE_TREE.engine)) {
             result.left = TABLE_ENGINE.COLLAPSING_MERGE_TREE;
             result.right = getSignColumnForCollapsingMergeTree(response);
+        } else if (response.contains(TABLE_ENGINE.SHARED_REPLACING_MERGE_TREE.engine)) {
+            result.left = TABLE_ENGINE.SHARED_REPLACING_MERGE_TREE;
+            result.right = getVersionColumnForReplacingMergeTree(response);
         } else if (response.contains(TABLE_ENGINE.REPLICATED_REPLACING_MERGE_TREE.engine)) {
             result.left = TABLE_ENGINE.REPLICATED_REPLACING_MERGE_TREE;
             result.right = getVersionColumnForReplacingMergeTree(response);
