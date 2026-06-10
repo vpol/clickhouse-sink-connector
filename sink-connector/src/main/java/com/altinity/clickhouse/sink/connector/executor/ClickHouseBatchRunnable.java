@@ -718,22 +718,10 @@ public class ClickHouseBatchRunnable implements Runnable {
 
         DbWriter writer = getDbWriterForTable(topicName, tableName, databaseName,
                 firstRecord, databaseConn);
-        // Sorting key passed as a supplier, not a snapshot: this executor is
-        // built BEFORE the metadata-retry block below, which is where a table
-        // created by DDL (rather than by auto-create) first resolves its
-        // sorting key. A value captured here would still be empty, and the
-        // writer would then silently skip the UPDATE tombstone.
-        final DbWriter sortingKeySource = writer;
-        PreparedStatementExecutor preparedStatementExecutor = new
-                PreparedStatementExecutor(writer.getReplacingMergeTreeDeleteColumn(),
-                writer.isReplacingMergeTreeWithIsDeletedColumn(), writer.getSignColumn(),
-                writer.getVersionColumn(), writer.getDatabaseName(),
-                getServerTimeZone(this.config),
-                sortingKeySource::getSortingKeyColumns);
         if (writer == null || writer.wasTableMetaDataRetrieved() == false) {
             log.error(String.format("*** TABLE METADATA not retrieved for " +
                             "Database(%s), table(%s) retrying",
-                    writer.getDatabaseName(), writer.getTableName()));
+                    databaseName, tableName));
             if (writer == null) {
                 writer = getDbWriterForTable(topicName, tableName, databaseName,
                         firstRecord, databaseConn);
@@ -744,10 +732,17 @@ public class ClickHouseBatchRunnable implements Runnable {
                     writer.wasTableMetaDataRetrieved() == false) {
                 log.error(String.format("*** TABLE METADATA not retrieved for " +
                                 "Database(%s), table(%s), retrying on next attempt",
-                        writer.getDatabaseName(), writer.getTableName()));
+                        databaseName, tableName));
                 return false;
             }
         }
+        final DbWriter sortingKeySource = writer;
+        PreparedStatementExecutor preparedStatementExecutor = new
+                PreparedStatementExecutor(writer.getReplacingMergeTreeDeleteColumn(),
+                writer.isReplacingMergeTreeWithIsDeletedColumn(), writer.getSignColumn(),
+                writer.getVersionColumn(), writer.getDatabaseName(),
+                getServerTimeZone(this.config),
+                        sortingKeySource::getSortingKeyColumns);
         // Step 1: The Batch Insert with preparedStatement in JDBC works by
         // forming the Query and then adding records to the Batch.
         // This step creates a Map of Query -> Records (List of ClickHouseStruct).
