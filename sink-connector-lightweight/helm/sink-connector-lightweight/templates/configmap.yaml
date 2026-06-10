@@ -136,7 +136,7 @@ data:
       clickhouse.datetime.timezone: "America/Chicago"
       ignore.ddl.regex: "(?i)(ANALYZE PARTITION).*"
       clickhouse.jdbc.params: "keepalive.timeout=3,max_buffer_size=1000000,socket_timeout=30000,connection_timeout=30000"
-      clickhouse.jdbc.settings: "input_format_null_as_default=0,allow_experimental_object_type=1,insert_allow_materialized_columns=1"
+      clickhouse.jdbc.settings: "input_format_null_as_default=0,insert_allow_materialized_columns=1"
       metrics.enable: "true"
       connection.pool.disable: "true"
       use.nongraceful.disconnect: "true"

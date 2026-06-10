@@ -9,6 +9,7 @@ import java.sql.Connection;
 import java.time.ZoneId;
 import java.util.Arrays;
 import java.util.Properties;
+import java.util.stream.Collectors;
 import com.zaxxer.hikari.HikariDataSource;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
@@ -26,6 +27,18 @@ public class BaseDbWriter {
      * for a retry is computed as <code>maxRetries * RETRY_DELAY_MS</code>.
      */
     private static final int RETRY_DELAY_MS = 5000;
+
+    /**
+     * ClickHouse Cloud does not allow clients to change this setting.
+     */
+    private static final String ALLOW_EXPERIMENTAL_OBJECT_TYPE =
+            "allow_experimental_object_type";
+
+    /**
+     * Default ClickHouse custom settings used for new connections.
+     */
+    private static final String DEFAULT_CUSTOM_SETTINGS =
+            "insert_allow_materialized_columns=1";
 
     /**
      * The name of the database client.
@@ -184,6 +197,50 @@ public class BaseDbWriter {
     }
 
     /**
+     * Removes ClickHouse settings that cannot be changed by the client in
+     * ClickHouse Cloud.
+     *
+     * @param jdbcSettings comma-separated ClickHouse settings
+     * @return sanitized settings string
+     */
+    static String sanitizeJdbcSettings(String jdbcSettings) {
+        if (jdbcSettings == null || jdbcSettings.isEmpty()) {
+            return "";
+        }
+
+        return Arrays.stream(jdbcSettings.split(","))
+                .map(String::trim)
+                .filter(setting -> !setting.isEmpty())
+                .filter(setting -> {
+                    String[] keyValue = setting.split("=", 2);
+                    return !ALLOW_EXPERIMENTAL_OBJECT_TYPE
+                            .equalsIgnoreCase(keyValue[0].trim());
+                })
+                .collect(Collectors.joining(","));
+    }
+
+    /**
+     * Checks if the JDBC settings include a setting blocked by ClickHouse Cloud.
+     *
+     * @param jdbcSettings comma-separated ClickHouse settings
+     * @return true when a blocked setting is present
+     */
+    static boolean containsBlockedClickHouseCloudSetting(String jdbcSettings) {
+        if (jdbcSettings == null || jdbcSettings.isEmpty()) {
+            return false;
+        }
+
+        return Arrays.stream(jdbcSettings.split(","))
+                .map(String::trim)
+                .filter(setting -> !setting.isEmpty())
+                .anyMatch(setting -> {
+                    String[] keyValue = setting.split("=", 2);
+                    return ALLOW_EXPERIMENTAL_OBJECT_TYPE
+                            .equalsIgnoreCase(keyValue[0].trim());
+                });
+    }
+
+    /**
      * Retrieves the current database connection. If the connection is null,
      * a new connection is initiated.
      *
@@ -248,10 +305,15 @@ public class BaseDbWriter {
         try {
             Properties properties = new Properties();
             properties.setProperty("client_name", clientName);
-            if(!jdbcSettings.isEmpty()) {
-                properties.setProperty("custom_settings", jdbcSettings);
+            String sanitizedJdbcSettings = sanitizeJdbcSettings(jdbcSettings);
+            if (containsBlockedClickHouseCloudSetting(jdbcSettings)) {
+                log.warn("Skipping ClickHouse setting {} because it cannot be changed by the client",
+                        ALLOW_EXPERIMENTAL_OBJECT_TYPE);
+            }
+            if(!sanitizedJdbcSettings.isEmpty()) {
+                properties.setProperty("custom_settings", sanitizedJdbcSettings);
             } else {
-                properties.setProperty("custom_settings", "allow_experimental_object_type=1,insert_allow_materialized_columns=1");
+                properties.setProperty("custom_settings", DEFAULT_CUSTOM_SETTINGS);
             }
             boolean connectionPoolDisable = config.getBoolean(ClickHouseSinkConnectorConfigVariables.CONNECTION_POOL_DISABLE.toString());
             // Set the http connection provider to HTTP_URL_CONNECTION if connection pool is enabled.
@@ -289,7 +351,8 @@ public class BaseDbWriter {
                 conn = hikariDbSource.getConnection();
             }
         } catch (Exception e) {
-            log.error("Error creating ClickHouse connection" + e);
+            log.error("Error creating ClickHouse connection", e);
+            throw new IllegalStateException("Error creating ClickHouse connection", e);
         }
         return conn;
     }

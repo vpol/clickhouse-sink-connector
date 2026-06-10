@@ -5,9 +5,11 @@ For each upstream release that needs ClickHouse Cloud compatibility, create a
 local branch named `patched/<version>` from the matching upstream tag, then
 apply the compatibility patch on top.
 
-## Current Patch
+## Current Patches
 
-The local compatibility patch teaches `DBMetadata` to recognize
+### SharedReplacingMergeTree
+
+This compatibility patch teaches `DBMetadata` to recognize
 `SharedReplacingMergeTree`, which ClickHouse Cloud can return for replacing
 table engines.
 
@@ -24,6 +26,30 @@ Patch shape:
   optional delete-marker parameters.
 - Detect `SharedReplacingMergeTree` before the broader
   `ReplacingMergeTree` match.
+
+### ClickHouse Cloud JDBC Settings
+
+This compatibility patch prevents startup failures on ClickHouse Cloud where
+the server rejects client attempts to change `allow_experimental_object_type`.
+
+Touched files:
+
+- `sink-connector/src/main/java/com/altinity/clickhouse/sink/connector/db/BaseDbWriter.java`
+- `sink-connector/src/main/java/com/altinity/clickhouse/sink/connector/db/HikariDbSource.java`
+- `sink-connector/src/test/java/com/altinity/clickhouse/sink/connector/db/BaseDbWriterTest.java`
+- `doc/configuration.md`
+- `sink-connector-lightweight/docker/config.yml`
+- `sink-connector-lightweight/docker/config_local.yml`
+- `sink-connector-lightweight/helm/sink-connector-lightweight/templates/configmap.yaml`
+
+Patch shape:
+
+- Remove `allow_experimental_object_type=1` from default custom settings.
+- Strip `allow_experimental_object_type` from configured
+  `clickhouse.jdbc.settings` so existing copied configs remain Cloud-safe.
+- Keep `insert_allow_materialized_columns=1` in default custom settings.
+- Throw a clear connection initialization error instead of returning `null`
+  and failing later with a misleading `NullPointerException`.
 
 ## Refresh Workflow
 
