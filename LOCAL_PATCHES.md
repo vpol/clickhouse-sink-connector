@@ -51,6 +51,21 @@ Patch shape:
 - Throw a clear connection initialization error instead of returning `null`
   and failing later with a misleading `NullPointerException`.
 
+### Debezium JDBC Storage Config Keys
+
+Debezium 3.x renamed JDBC storage table properties. Config files should use
+the new names directly:
+
+- `offset.storage.jdbc.offset.table.*` -> `offset.storage.jdbc.table.*`
+- `schema.history.internal.jdbc.schema.history.table.*` ->
+  `schema.history.internal.jdbc.table.*`
+- `schema.history.internal.table.*` ->
+  `schema.history.internal.jdbc.table.*`
+
+For deployed configs, update `/config/config.yml` before starting the
+connector. The patched branch only updates bundled examples/templates and does
+not add runtime alias translation.
+
 ## Refresh Workflow
 
 ```sh
