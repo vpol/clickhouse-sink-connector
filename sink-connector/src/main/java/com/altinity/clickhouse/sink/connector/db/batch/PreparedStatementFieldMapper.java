@@ -340,10 +340,7 @@ public class PreparedStatementFieldMapper {
                                       ClickHouseSinkConnectorConfig config,
                                       Map<String, String> columnNameToDataTypeMap,
                                       DBMetadata.TABLE_ENGINE engine) throws Exception {
-        if (engine != null &&
-                (engine.getEngine() == DBMetadata.TABLE_ENGINE.REPLACING_MERGE_TREE.getEngine() ||
-                        engine.getEngine() == DBMetadata.TABLE_ENGINE.REPLICATED_REPLACING_MERGE_TREE.getEngine())
-                && versionColumn != null) {
+        if (DBMetadata.isReplacingMergeTreeEngine(engine) && versionColumn != null) {
             if (columnNameToDataTypeMap.containsKey(versionColumn)) {
                 if (columnNameToIndexMap.containsKey(versionColumn)) {
                     // Calculate version if not already set
@@ -471,4 +468,3 @@ public class PreparedStatementFieldMapper {
         return chDataType;
     }
 }
-

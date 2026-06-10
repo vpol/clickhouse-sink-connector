@@ -137,6 +137,18 @@ public class DBMetadata {
     }
 
     /**
+     * Checks if the table engine is a ReplacingMergeTree variant.
+     *
+     * @param engine The table engine.
+     * @return true for ReplacingMergeTree-compatible engines.
+     */
+    public static boolean isReplacingMergeTreeEngine(TABLE_ENGINE engine) {
+        return engine == TABLE_ENGINE.REPLACING_MERGE_TREE
+                || engine == TABLE_ENGINE.REPLICATED_REPLACING_MERGE_TREE
+                || engine == TABLE_ENGINE.SHARED_REPLACING_MERGE_TREE;
+    }
+
+    /**
      * Wrapper function to get the engine type and specific column details for the table.
      * @param conn The database connection.
      * @param databaseName The name of the database.
@@ -217,17 +229,7 @@ public class DBMetadata {
                 if (rs != null && rs.next()) {
                     String response = rs.getString(1);
                     // Determine table engine type based on the response.
-                    if (response.contains(TABLE_ENGINE.COLLAPSING_MERGE_TREE.engine)) {
-                        result.left = TABLE_ENGINE.COLLAPSING_MERGE_TREE;
-                        result.right = getSignColumnForCollapsingMergeTree(response);
-                    } else if (response.contains(TABLE_ENGINE.REPLACING_MERGE_TREE.engine)) {
-                        result.left = TABLE_ENGINE.REPLACING_MERGE_TREE;
-                        result.right = getVersionColumnForReplacingMergeTree(response);
-                    } else if (response.contains(TABLE_ENGINE.MERGE_TREE.engine)) {
-                        result.left = TABLE_ENGINE.MERGE_TREE;
-                    } else {
-                        result.left = TABLE_ENGINE.DEFAULT;
-                    }
+                    result = getEngineFromResponse(response);
                 }
                 rs.close();
                 stmt.close();

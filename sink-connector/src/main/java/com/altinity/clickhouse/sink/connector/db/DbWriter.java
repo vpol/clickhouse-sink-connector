@@ -284,23 +284,11 @@ public class DbWriter extends BaseDbWriter {
             return;
         }
 
-        String engineName = this.engine.getEngine();
-
-        if (isReplacingMergeTreeEngine(engineName)) {
+        if (DBMetadata.isReplacingMergeTreeEngine(this.engine)) {
             configureReplacingMergeTreeColumns(tableEngineResponse.getRight());
-        } else if (isCollapsingMergeTreeEngine(engineName)) {
+        } else if (isCollapsingMergeTreeEngine(this.engine.getEngine())) {
             this.signColumn = tableEngineResponse.getRight();
         }
-    }
-
-    /**
-     * Checks if the engine is a ReplacingMergeTree variant.
-     */
-    private boolean isReplacingMergeTreeEngine(String engineName) {
-        return engineName.equalsIgnoreCase(
-                DBMetadata.TABLE_ENGINE.REPLACING_MERGE_TREE.getEngine())
-                || engineName.equalsIgnoreCase(
-                DBMetadata.TABLE_ENGINE.REPLICATED_REPLACING_MERGE_TREE.getEngine());
     }
 
     /**

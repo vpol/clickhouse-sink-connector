@@ -128,6 +128,13 @@ public class DBMetadataTest {
         Assert.assertTrue(replicatedReplacingMergeTreeWIsDeletedColumnResult.getRight().equalsIgnoreCase("_version,is_deleted"));
         Assert.assertTrue(replicatedReplacingMergeTreeWIsDeletedColumnResult.getLeft().getEngine().equalsIgnoreCase(DBMetadata.TABLE_ENGINE.REPLICATED_REPLACING_MERGE_TREE.getEngine()));
 
+        String sharedReplacingMergeTreeWIsDeletedColumn = "SharedReplacingMergeTree('/clickhouse/tables/{uuid}/{shard}', '{replica}', _version, is_deleted) ORDER BY id";
+        MutablePair<DBMetadata.TABLE_ENGINE, String> sharedReplacingMergeTreeWIsDeletedColumnResult = new DBMetadata(new ClickHouseSinkConnectorConfig(new HashMap<>())).getEngineFromResponse(sharedReplacingMergeTreeWIsDeletedColumn);
+
+        Assert.assertTrue(sharedReplacingMergeTreeWIsDeletedColumnResult.getRight().equalsIgnoreCase("_version,is_deleted"));
+        Assert.assertTrue(sharedReplacingMergeTreeWIsDeletedColumnResult.getLeft().getEngine().equalsIgnoreCase(DBMetadata.TABLE_ENGINE.SHARED_REPLACING_MERGE_TREE.getEngine()));
+        Assert.assertTrue(DBMetadata.isReplacingMergeTreeEngine(sharedReplacingMergeTreeWIsDeletedColumnResult.getLeft()));
+
     }
 
     @ParameterizedTest

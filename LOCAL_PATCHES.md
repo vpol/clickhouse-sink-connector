@@ -26,6 +26,8 @@ Patch shape:
   optional delete-marker parameters.
 - Detect `SharedReplacingMergeTree` before the broader
   `ReplacingMergeTree` match.
+- Treat `SharedReplacingMergeTree` as a replacing engine in the writer path so
+  generated `_version` and `is_deleted` values are bound during inserts.
 
 ### ClickHouse Cloud JDBC Settings
 
