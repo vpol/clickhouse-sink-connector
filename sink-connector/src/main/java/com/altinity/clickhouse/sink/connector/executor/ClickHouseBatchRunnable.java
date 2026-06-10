@@ -604,11 +604,6 @@ public class ClickHouseBatchRunnable implements Runnable {
 
         DbWriter writer = getDbWriterForTable(topicName, tableName, databaseName,
                 firstRecord, databaseConn);
-        PreparedStatementExecutor preparedStatementExecutor = new
-                PreparedStatementExecutor(writer.getReplacingMergeTreeDeleteColumn(),
-                writer.isReplacingMergeTreeWithIsDeletedColumn(), writer.getSignColumn(),
-                writer.getVersionColumn(), writer.getDatabaseName(),
-                getServerTimeZone(this.config));
         if (writer == null || writer.wasTableMetaDataRetrieved() == false) {
             log.error(String.format("*** TABLE METADATA not retrieved for " +
                             "Database(%s), table(%s) retrying",
@@ -627,6 +622,11 @@ public class ClickHouseBatchRunnable implements Runnable {
                 return false;
             }
         }
+        PreparedStatementExecutor preparedStatementExecutor = new
+                PreparedStatementExecutor(writer.getReplacingMergeTreeDeleteColumn(),
+                writer.isReplacingMergeTreeWithIsDeletedColumn(), writer.getSignColumn(),
+                writer.getVersionColumn(), writer.getDatabaseName(),
+                getServerTimeZone(this.config));
         // Step 1: The Batch Insert with preparedStatement in JDBC works by
         // forming the Query and then adding records to the Batch.
         // This step creates a Map of Query -> Records (List of ClickHouseStruct).

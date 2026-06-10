@@ -28,6 +28,8 @@ Patch shape:
   `ReplacingMergeTree` match.
 - Treat `SharedReplacingMergeTree` as a replacing engine in the writer path so
   generated `_version` and `is_deleted` values are bound during inserts.
+- Re-run replacing-engine column configuration after metadata refreshes, and
+  create prepared statement executors only after table metadata is available.
 
 ### ClickHouse Cloud JDBC Settings
 

@@ -19,6 +19,8 @@ import java.util.LinkedHashMap;
 import java.util.Map;
 
 import static io.debezium.storage.jdbc.offset.JdbcOffsetBackingStoreConfig.OFFSET_STORAGE_PREFIX;
+import static com.altinity.clickhouse.sink.connector.db.ClickHouseDbConstants.IS_DELETED_COLUMN;
+import static com.altinity.clickhouse.sink.connector.db.ClickHouseDbConstants.VERSION_COLUMN;
 
 /**
  * Class that abstracts all functionality related to interacting
@@ -305,6 +307,9 @@ public class DbWriter extends BaseDbWriter {
      * @param rmtColumns The column specification from table engine response.
      */
     private void configureReplacingMergeTreeColumns(String rmtColumns) {
+        String configuredDeleteColumn = this.config.getString(
+                ClickHouseSinkConnectorConfigVariables.REPLACING_MERGE_TREE_DELETE_COLUMN.toString());
+
         if (rmtColumns != null && rmtColumns.contains(",")) {
             // The table uses the new RMT with version and deleted column
             String[] parts = rmtColumns.split(",");
@@ -313,8 +318,23 @@ public class DbWriter extends BaseDbWriter {
             this.replacingMergeTreeWithIsDeletedColumn = true;
         } else {
             this.versionColumn = rmtColumns;
-            this.replacingMergeTreeDeleteColumn = this.config.getString(
-                    ClickHouseSinkConnectorConfigVariables.REPLACING_MERGE_TREE_DELETE_COLUMN.toString());
+            this.replacingMergeTreeDeleteColumn = configuredDeleteColumn;
+        }
+
+        if ((this.versionColumn == null || !this.columnNameToDataTypeMap.containsKey(this.versionColumn))
+                && this.columnNameToDataTypeMap.containsKey(VERSION_COLUMN)) {
+            this.versionColumn = VERSION_COLUMN;
+        }
+
+        if ((this.replacingMergeTreeDeleteColumn == null
+                || !this.columnNameToDataTypeMap.containsKey(this.replacingMergeTreeDeleteColumn))
+                && this.columnNameToDataTypeMap.containsKey(IS_DELETED_COLUMN)) {
+            this.replacingMergeTreeDeleteColumn = IS_DELETED_COLUMN;
+        }
+
+        if (this.replacingMergeTreeDeleteColumn != null
+                && this.columnNameToDataTypeMap.containsKey(this.replacingMergeTreeDeleteColumn)) {
+            this.replacingMergeTreeWithIsDeletedColumn = true;
         }
     }
 
@@ -366,6 +386,7 @@ public class DbWriter extends BaseDbWriter {
                 tableName, this.conn, database);
         this.tableEngineResponse = dbMetadata.getTableEngine(this.conn, database, tableName);
         this.engine = tableEngineResponse.getLeft();
+        configureEngineSpecificColumns();
     }
 
     /**
