@@ -364,34 +364,28 @@ public class PreparedStatementFieldMapper {
                                                        Map<String, String> columnNameToDataTypeMap,
                                                        boolean beforeSection) throws Exception {
         if (this.replacingMergeTreeDeleteColumn != null && columnNameToDataTypeMap.containsKey(replacingMergeTreeDeleteColumn)) {
-            if (columnNameToIndexMap.containsKey(replacingMergeTreeDeleteColumn) &&
-                    !config.getBoolean(ClickHouseSinkConnectorConfigVariables.IGNORE_DELETE.toString())) {
-                if (record.getCdcOperation().getOperation().equalsIgnoreCase(ClickHouseConverter.CDC_OPERATION.DELETE.getOperation())) {
-                    // if after section and REPLICATION HISTORY ENABLE is set to true in config
-                    if(config.getBoolean(ClickHouseSinkConnectorConfigVariables.REPLICATION_HISTORY_ENABLE.toString())) {
-                        if(!beforeSection){
-                            if (replacingMergeTreeWithIsDeletedColumn)
-                                ps.setInt(columnNameToIndexMap.get(replacingMergeTreeDeleteColumn), 1);
-                            else
-                                ps.setInt(columnNameToIndexMap.get(replacingMergeTreeDeleteColumn), -1);
-                        } else {
-                            // before section.
-                            if (replacingMergeTreeWithIsDeletedColumn)
-                                ps.setInt(columnNameToIndexMap.get(replacingMergeTreeDeleteColumn), 0);
-                            else
-                                ps.setInt(columnNameToIndexMap.get(replacingMergeTreeDeleteColumn), 1);
-                        }
+            if (columnNameToIndexMap.containsKey(replacingMergeTreeDeleteColumn)) {
+                int deleteColumnIndex = columnNameToIndexMap.get(replacingMergeTreeDeleteColumn);
+                int notDeletedValue = replacingMergeTreeWithIsDeletedColumn ? 0 : 1;
+                int deletedValue = replacingMergeTreeWithIsDeletedColumn ? 1 : -1;
+                boolean isDelete = record.getCdcOperation().getOperation()
+                        .equalsIgnoreCase(ClickHouseConverter.CDC_OPERATION.DELETE.getOperation());
+                boolean ignoreDelete = config.getBoolean(ClickHouseSinkConnectorConfigVariables.IGNORE_DELETE.toString());
+
+                if (!isDelete || ignoreDelete) {
+                    ps.setInt(deleteColumnIndex, notDeletedValue);
+                    return;
+                }
+
+                // if after section and REPLICATION HISTORY ENABLE is set to true in config
+                if (config.getBoolean(ClickHouseSinkConnectorConfigVariables.REPLICATION_HISTORY_ENABLE.toString())) {
+                    if (!beforeSection) {
+                        ps.setInt(deleteColumnIndex, deletedValue);
                     } else {
-                        if (replacingMergeTreeWithIsDeletedColumn)
-                            ps.setInt(columnNameToIndexMap.get(replacingMergeTreeDeleteColumn), 1);
-                        else
-                            ps.setInt(columnNameToIndexMap.get(replacingMergeTreeDeleteColumn), -1);
+                        ps.setInt(deleteColumnIndex, notDeletedValue);
                     }
                 } else {
-                    if (replacingMergeTreeWithIsDeletedColumn)
-                        ps.setInt(columnNameToIndexMap.get(replacingMergeTreeDeleteColumn), 0);
-                    else
-                        ps.setInt(columnNameToIndexMap.get(replacingMergeTreeDeleteColumn), 1);
+                    ps.setInt(deleteColumnIndex, deletedValue);
                 }
             }
         }
