@@ -30,6 +30,8 @@ Patch shape:
   generated `_version` and `is_deleted` values are bound during inserts.
 - Re-run replacing-engine column configuration after metadata refreshes, and
   create prepared statement executors only after table metadata is available.
+- Keep binding the replacing delete column to the not-deleted value for
+  non-delete rows, even when `ignore_delete=true`.
 
 ### ClickHouse Cloud JDBC Settings
 
