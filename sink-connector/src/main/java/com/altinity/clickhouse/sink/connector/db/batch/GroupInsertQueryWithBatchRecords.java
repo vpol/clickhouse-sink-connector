@@ -87,23 +87,9 @@ public class GroupInsertQueryWithBatchRecords {
                         tableName, config, columnNameToDataTypeMap);
             } else if (CdcRecordState.CDC_RECORD_STATE_AFTER ==
                     getCdcSectionBasedOnOperation(record.getCdcOperation())) {
-                if (enableSchemaEvolution) {
-                    try {
-                        List<Field> afterFields =
-                                record.getAfterStruct().schema().fields();
-                        if (hasMissingColumns(afterFields,
-                                columnNameToDataTypeMap)) {
-                            new ClickHouseAlterTable().alterTable(
-                                    afterFields, tableName, connection,
-                                    columnNameToDataTypeMap, config);
-                            columnNameToDataTypeMap = new DBMetadata(config)
-                                    .getColumnsDataTypesForTable(tableName,
-                                            connection, databaseName);
-                        }
-                    } catch (Exception e) {
-                        log.error("**** ERROR ALTER TABLE: " + tableName, e);
-                    }
-                }
+                columnNameToDataTypeMap = evolveSchemaIfEnabled(
+                        enableSchemaEvolution, record, tableName, databaseName,
+                        connection, columnNameToDataTypeMap, config);
                 // columnNameToDataTypeMap = new DBMetadata().getColumnsDataTypesForTable(
                 // tableName, connection, databaseName, config );
                 result = updateQueryToRecordsMap(record,
@@ -113,6 +99,9 @@ public class GroupInsertQueryWithBatchRecords {
             // UPDATE: This creates 2 records, one with before and another one with after.
             else if (CdcRecordState.CDC_RECORD_STATE_BOTH ==
                     getCdcSectionBasedOnOperation(record.getCdcOperation())) {
+                columnNameToDataTypeMap = evolveSchemaIfEnabled(
+                        enableSchemaEvolution, record, tableName, databaseName,
+                        connection, columnNameToDataTypeMap, config);
                 // if replication history is enabled, then dont split to 2 records.
                 if (config.getBoolean(ClickHouseSinkConnectorConfigVariables.REPLICATION_HISTORY_ENABLE.toString())) {
                         result = updateQueryToRecordsMap(record,
@@ -145,6 +134,39 @@ public class GroupInsertQueryWithBatchRecords {
             }
         }
         return result;
+    }
+
+    private Map<String, String> evolveSchemaIfEnabled(
+            boolean enableSchemaEvolution,
+            ClickHouseStruct record,
+            String tableName,
+            String databaseName,
+            Connection connection,
+            Map<String, String> columnNameToDataTypeMap,
+            ClickHouseSinkConnectorConfig config) {
+        if (!enableSchemaEvolution || record.getAfterStruct() == null) {
+            return columnNameToDataTypeMap;
+        }
+
+        List<Field> afterFields = record.getAfterStruct().schema().fields();
+        if (!hasMissingColumns(afterFields, columnNameToDataTypeMap)) {
+            return columnNameToDataTypeMap;
+        }
+
+        try {
+            new ClickHouseAlterTable().alterTable(
+                    afterFields,
+                    tableName, connection, columnNameToDataTypeMap, config);
+            Map<String, String> refreshedColumnMap = new DBMetadata(config)
+                    .getColumnsDataTypesForTable(tableName,
+                            connection, databaseName);
+            columnNameToDataTypeMap.clear();
+            columnNameToDataTypeMap.putAll(refreshedColumnMap);
+        } catch (Exception e) {
+            log.error("**** ERROR ALTER TABLE: " + tableName, e);
+        }
+
+        return columnNameToDataTypeMap;
     }
 
     /**

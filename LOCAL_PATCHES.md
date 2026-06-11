@@ -107,6 +107,11 @@ predicate, so SharedReplacingMergeTree emits the old-key tombstone when an
 UPDATE moves a row. Regression coverage verifies both changed and unchanged
 sorting keys.
 
+The ClickHouse 26.4 harness additionally reproduced missing schema evolution
+on PostgreSQL UPDATE after ADD COLUMN. The existing fix `a3c397bea` from
+`codex/postgres-update-schema-evolution` was ported, retaining the missing-column
+guard from `556213aee` and updating the writer's cached column map in place.
+
 Both module POMs already select ClickHouse JDBC **0.9.8** in the target base.
 The default is the V2 implementation; `clickhouse.jdbc.v1=true` explicitly opts
 into the legacy implementation bundled inside 0.9.8. No 0.6.5 dependency is
