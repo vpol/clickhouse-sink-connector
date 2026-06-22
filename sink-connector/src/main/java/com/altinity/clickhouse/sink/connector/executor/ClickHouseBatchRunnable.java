@@ -391,69 +391,82 @@ public class ClickHouseBatchRunnable implements Runnable {
      * @throws Exception if processing fails
      */
     private void processBatch(String sourceTimeZone, String serverTimeZone) throws Exception {
+        List<ClickHouseStruct> batch = currentBatch;
+        boolean addedToInflight = false;
+        boolean processed = false;
+
         // If replication history is enabled, add the records to the history table.
-        addRecordsToHistoryTable(currentBatch, sourceTimeZone, serverTimeZone);
+        addRecordsToHistoryTable(batch, sourceTimeZone, serverTimeZone);
 
         ///// ***** START PROCESSING BATCH **************************
-        // Step 1: Add to Inflight batches.
-        DebeziumOffsetManagement.addToBatchTimestamps(currentBatch);
-        log.info("****** Thread: " +
-                Thread.currentThread().getName() +
-                " Batch Size: " + currentBatch.size() +
-                " ******");
-        // Group records by topic name.
-        // Create a new map of topic name to list of records.
-        Map<String, List<ClickHouseStruct>> topicToRecordsMap =
-                new ConcurrentHashMap<>();
-        currentBatch.forEach(record -> {
-            String topicName = record.getTopic();
-            // If the topic name is not present, create a new list and
-            // add the record.
-            if (topicToRecordsMap.containsKey(topicName) == false) {
-                List<ClickHouseStruct> recordsList = new ArrayList<>();
-                recordsList.add(record);
-                topicToRecordsMap.put(topicName, recordsList);
+        try {
+            // Step 1: Add to Inflight batches.
+            DebeziumOffsetManagement.addToBatchTimestamps(batch);
+            addedToInflight = true;
+            log.info("****** Thread: " +
+                    Thread.currentThread().getName() +
+                    " Batch Size: " + batch.size() +
+                    " ******");
+            // Group records by topic name.
+            // Create a new map of topic name to list of records.
+            Map<String, List<ClickHouseStruct>> topicToRecordsMap =
+                    new ConcurrentHashMap<>();
+            batch.forEach(record -> {
+                String topicName = record.getTopic();
+                // If the topic name is not present, create a new list and
+                // add the record.
+                if (topicToRecordsMap.containsKey(topicName) == false) {
+                    List<ClickHouseStruct> recordsList = new ArrayList<>();
+                    recordsList.add(record);
+                    topicToRecordsMap.put(topicName, recordsList);
+                } else {
+                    // If the topic name is present, add the record to the list.
+                    List<ClickHouseStruct> recordsList =
+                            topicToRecordsMap.get(topicName);
+                    recordsList.add(record);
+                    topicToRecordsMap.put(topicName, recordsList);
+                }
+            });
+            boolean result = true;
+            // For each topic, process the records.
+            // topic name syntax is server.database.table
+
+            boolean replicationHistoryEnabled = config.getBoolean(
+                ClickHouseSinkConnectorConfigVariables.REPLICATION_HISTORY_ENABLE.toString());
+            boolean replicationLogOnly = config.getBoolean(
+                ClickHouseSinkConnectorConfigVariables.REPLICATION_HISTORY_REPLICATION_LOG_ONLY.toString());
+            if(replicationLogOnly && replicationHistoryEnabled)  {
+                // skip the following for loop and continue to the next step
+                log.debug("Replication log only mode is enabled, skipping the processing of records");
             } else {
-                // If the topic name is present, add the record to the list.
-                List<ClickHouseStruct> recordsList =
-                        topicToRecordsMap.get(topicName);
-                recordsList.add(record);
-                topicToRecordsMap.put(topicName, recordsList);
-            }
-        });
-        boolean result = true;
-        // For each topic, process the records.
-        // topic name syntax is server.database.table
+                for (Map.Entry<String, List<ClickHouseStruct>> entry :
+                        topicToRecordsMap.entrySet()) {
 
-        boolean replicationHistoryEnabled = config.getBoolean(
-            ClickHouseSinkConnectorConfigVariables.REPLICATION_HISTORY_ENABLE.toString());
-        boolean replicationLogOnly = config.getBoolean(
-            ClickHouseSinkConnectorConfigVariables.REPLICATION_HISTORY_REPLICATION_LOG_ONLY.toString());
-        if(replicationLogOnly && replicationHistoryEnabled)  { 
-            // skip the following for loop and continue to the next step
-            log.debug("Replication log only mode is enabled, skipping the processing of records");
-        } else {
-            for (Map.Entry<String, List<ClickHouseStruct>> entry :
-                    topicToRecordsMap.entrySet()) {
+                    result = processRecordsByTopic(entry.getKey(),
+                            entry.getValue());
 
-                result = processRecordsByTopic(entry.getKey(),
-                        entry.getValue());
-
-                if (result == false) {
-                    log.error("Error processing records for topic: " +
-                            entry.getKey());
-                    break;
+                    if (result == false) {
+                        log.error("Error processing records for topic: " +
+                                entry.getKey());
+                        break;
+                    }
                 }
             }
-        }
-            
-        
-        if (result) {
-            // Step 2: Check if the batch can be committed.
-            if(DebeziumOffsetManagement.checkIfBatchCanBeCommitted(currentBatch)) {
+
+            if (result) {
+                // Step 2: Check if the batch can be committed. A false result
+                // means offsets are delayed in completedBatches, not that the
+                // ClickHouse write failed.
+                DebeziumOffsetManagement.checkIfBatchCanBeCommitted(batch);
                 currentBatch = null;
+                processed = true;
+            }
+        } finally {
+            if (addedToInflight && processed == false) {
+                DebeziumOffsetManagement.removeFromBatchTimestamps(batch);
             }
         }
+
         Thread.sleep(config.getLong(
                 ClickHouseSinkConnectorConfigVariables.
                         BUFFER_FLUSH_TIME.toString()));

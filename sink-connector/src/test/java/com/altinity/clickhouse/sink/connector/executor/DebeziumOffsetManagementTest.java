@@ -8,6 +8,7 @@ import org.apache.kafka.connect.data.Schema;
 import org.apache.kafka.connect.data.SchemaBuilder;
 import org.apache.kafka.connect.data.Struct;
 import org.junit.Assert;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
 import java.util.ArrayList;
@@ -16,6 +17,12 @@ import java.util.List;
 import java.util.Map;
 
 public class DebeziumOffsetManagementTest {
+
+    @BeforeEach
+    public void clearBatchState() {
+        DebeziumOffsetManagement.inFlightBatches.clear();
+        DebeziumOffsetManagement.completedBatches.clear();
+    }
 
     // Test function to validate the isWithinRange function
     @Test
@@ -120,6 +127,43 @@ public class DebeziumOffsetManagementTest {
         Assert.assertTrue(result.getRight() == 433L);
 
     }
+
+    @Test
+    public void testRemoveBatchFromInflightTimestamps() {
+        List<ClickHouseStruct> batch = batchWithTimestamps(10L, 20L);
+
+        DebeziumOffsetManagement.addToBatchTimestamps(batch);
+        Assert.assertEquals(1, DebeziumOffsetManagement.inFlightBatches.size());
+
+        DebeziumOffsetManagement.removeFromBatchTimestamps(batch);
+
+        Assert.assertTrue(DebeziumOffsetManagement.inFlightBatches.isEmpty());
+    }
+
+    @Test
+    public void testDeferredCommitMovesBatchOutOfInflight() throws InterruptedException {
+        List<ClickHouseStruct> earlierBatch = batchWithTimestamps(1L, 10L);
+        List<ClickHouseStruct> laterBatch = batchWithTimestamps(11L, 20L);
+        DebeziumOffsetManagement.addToBatchTimestamps(earlierBatch);
+        DebeziumOffsetManagement.addToBatchTimestamps(laterBatch);
+
+        boolean committed = DebeziumOffsetManagement.checkIfBatchCanBeCommitted(laterBatch);
+
+        Assert.assertFalse(committed);
+        Assert.assertFalse(DebeziumOffsetManagement.inFlightBatches.containsValue(laterBatch));
+        Assert.assertTrue(DebeziumOffsetManagement.completedBatches.containsValue(laterBatch));
+    }
+
+    private static List<ClickHouseStruct> batchWithTimestamps(Long... timestamps) {
+        List<ClickHouseStruct> batch = new ArrayList<>();
+        for (Long timestamp : timestamps) {
+            ClickHouseStruct record = new ClickHouseStruct(10, "SERVER5432.test.customers", getKafkaStruct(), 2, 21L, null, getKafkaStruct(), null, ClickHouseConverter.CDC_OPERATION.CREATE);
+            record.setDebezium_ts_ms(timestamp);
+            batch.add(record);
+        }
+        return batch;
+    }
+
     public static Struct getKafkaStruct() {
         Schema kafkaConnectSchema = SchemaBuilder
                 .struct()

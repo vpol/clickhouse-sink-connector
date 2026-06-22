@@ -75,6 +75,18 @@ public class DebeziumOffsetManagement {
     }
 
     /**
+     * Removes the given batch from the in-flight batches map.
+     *
+     * @param batch A list of ClickHouseStruct records.
+     */
+    public static void removeFromBatchTimestamps(List<ClickHouseStruct> batch) {
+        if (batch == null) {
+            return;
+        }
+        inFlightBatches.remove(calculateMinMaxTimestampFromBatch(batch));
+    }
+
+    /**
      * Returns the map of in-flight batch timestamps.
      *
      * @return A map of timestamp pairs to their associated record lists.
