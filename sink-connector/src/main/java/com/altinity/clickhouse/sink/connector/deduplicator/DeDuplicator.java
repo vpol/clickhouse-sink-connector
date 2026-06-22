@@ -30,9 +30,8 @@ public class DeDuplicator {
     private ClickHouseSinkConnectorConfig config;
 
     /**
-     * Pool of record for de-duplication. Maps a deduplication key to a record.
-     * In case such a deduplication key already exists, deduplication policy comes into play -
-     * what record to keep (an old one (already registered) or a newly coming one).
+     * Pool of de-duplication keys.
+     * In case such a de-duplication key already exists, de-duplication policy comes into play.
      * Key is topic name.
      * <p>
      * TODO: Consider how this works when there are multiple tables assigned to one topic.
@@ -96,7 +95,7 @@ public class DeDuplicator {
         }
 
         // Update the deduplication pool with the new key
-        updateDedupePool(deDuplicationKey);
+        updateDedupePool(topicName, deDuplicationKey);
 
         return true;
     }
@@ -105,27 +104,30 @@ public class DeDuplicator {
      * Updates the de-duplication pool by adding a new key and removing old records
      * if the pool size exceeds the maximum allowed size.
      *
+     * @param topicName the topic to add the key under
      * @param deDuplicationKey the key to add to the pool
      */
-    public void updateDedupePool(Object deDuplicationKey) {
+    public void updateDedupePool(String topicName, Object deDuplicationKey) {
 
         log.debug("add new key to the pool:" + deDuplicationKey);
 
-        // Iterate through all topics and corresponding pools
-        for (Map.Entry<String, LinkedList<Object>> entry : this.queue.entrySet()) {
+        LinkedList<Object> matchingQueue = this.queue.computeIfAbsent(topicName,
+                key -> new LinkedList<>());
+        matchingQueue.addLast(deDuplicationKey);
 
-            LinkedList<Object> matchingQueue = entry.getValue();
+        Map<Object, Object> matchingRecords = this.records.get(topicName);
 
-            // If the pool size exceeds maxPoolSize, remove the oldest entries
-            while (matchingQueue.size() > this.maxPoolSize) {
-                log.info("records pool is too big, need to flush:" + this.queue.size());
-                Object key = matchingQueue.removeFirst();
-                if (key == null) {
-                    log.warn("unable to removeFirst() in the queue");
-                } else {
-                    matchingQueue.remove(key);
-                    log.info("removed key: " + key);
+        // If the pool size exceeds maxPoolSize, remove the oldest entries.
+        while (matchingQueue.size() > this.maxPoolSize) {
+            log.info("records pool is too big, need to flush:" + matchingQueue.size());
+            Object key = matchingQueue.removeFirst();
+            if (key == null) {
+                log.warn("unable to removeFirst() in the queue");
+            } else {
+                if (matchingRecords != null) {
+                    matchingRecords.remove(key);
                 }
+                log.info("removed key: " + key);
             }
         }
     }
@@ -147,7 +149,7 @@ public class DeDuplicator {
         if (matchingRecords == null) {
             // New record for topic, add it to the records pool
             matchingRecords = new HashMap<>();
-            matchingRecords.put(deDuplicationKey, record);
+            matchingRecords.put(deDuplicationKey, Boolean.TRUE);
 
             this.records.put(topicName, matchingRecords);
             result = true;
@@ -157,11 +159,14 @@ public class DeDuplicator {
 
                 // Depending on the policy, replace the record or keep the old one
                 if (this.policy == DeDuplicationPolicy.NEW) {
-                    matchingRecords.put(deDuplicationKey, record);
+                    matchingRecords.put(deDuplicationKey, Boolean.TRUE);
                     this.records.put(topicName, matchingRecords);
                     log.info("replace the key:" + deDuplicationKey);
                 }
                 result = false;
+            } else {
+                matchingRecords.put(deDuplicationKey, Boolean.TRUE);
+                result = true;
             }
         }
 
