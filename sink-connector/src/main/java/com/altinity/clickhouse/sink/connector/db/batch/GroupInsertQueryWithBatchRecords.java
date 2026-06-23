@@ -89,12 +89,17 @@ public class GroupInsertQueryWithBatchRecords {
                     getCdcSectionBasedOnOperation(record.getCdcOperation())) {
                 if (enableSchemaEvolution) {
                     try {
-                        new ClickHouseAlterTable().alterTable(
-                                record.getAfterStruct().schema().fields(),
-                                tableName, connection, columnNameToDataTypeMap, config);
-                        columnNameToDataTypeMap = new DBMetadata(config)
-                                .getColumnsDataTypesForTable(tableName,
-                                        connection, databaseName);
+                        List<Field> afterFields =
+                                record.getAfterStruct().schema().fields();
+                        if (hasMissingColumns(afterFields,
+                                columnNameToDataTypeMap)) {
+                            new ClickHouseAlterTable().alterTable(
+                                    afterFields, tableName, connection,
+                                    columnNameToDataTypeMap, config);
+                            columnNameToDataTypeMap = new DBMetadata(config)
+                                    .getColumnsDataTypesForTable(tableName,
+                                            connection, databaseName);
+                        }
                     } catch (Exception e) {
                         log.error("**** ERROR ALTER TABLE: " + tableName, e);
                     }
@@ -208,6 +213,16 @@ public class GroupInsertQueryWithBatchRecords {
             queryToRecordsMap.put(mp, recordsList);
         }
         return true;
+    }
+
+    private boolean hasMissingColumns(
+            List<Field> fields, Map<String, String> columnNameToDataTypeMap) {
+        for (Field field : fields) {
+            if (!columnNameToDataTypeMap.containsKey(field.name())) {
+                return true;
+            }
+        }
+        return false;
     }
 
     /**

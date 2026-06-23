@@ -183,14 +183,14 @@ public class DBMetadata {
                 log.info("Retrying checkIfDatabaseExists, attempt {}", retryCount);
                 try (Statement retryStmt = conn.createStatement()) {
                     String showSchemaQuery = String.format(CHECK_DB_EXISTS_SQL, databaseName);
-                    ResultSet retryRs = retryStmt.executeQuery(showSchemaQuery);
-                    if (retryRs != null && retryRs.next()) {
-                        String response = retryRs.getString(1);
-                        if (response.equalsIgnoreCase(databaseName)) {
-                            result = true;
+                    try (ResultSet retryRs = retryStmt.executeQuery(showSchemaQuery)) {
+                        if (retryRs != null && retryRs.next()) {
+                            String response = retryRs.getString(1);
+                            if (response.equalsIgnoreCase(databaseName)) {
+                                result = true;
+                            }
                         }
                     }
-                    retryRs.close();
                 }
             } catch (Exception retryException) {
                 log.error("Retry attempt ({}/{}) failed", retryCount,MAX_RETRIES, retryException);
@@ -225,15 +225,14 @@ public class DBMetadata {
         while (retryCount < MAX_RETRIES) {
             try (Statement stmt = conn.createStatement()) {
                 String showSchemaQuery = String.format("show create table %s.`%s`", databaseName, tableName);
-                ResultSet rs = stmt.executeQuery(showSchemaQuery);
-                if (rs != null && rs.next()) {
-                    String response = rs.getString(1);
-                    // Determine table engine type based on the response.
-                    result = getEngineFromResponse(response);
+                try (ResultSet rs = stmt.executeQuery(showSchemaQuery)) {
+                    if (rs != null && rs.next()) {
+                        String response = rs.getString(1);
+                        // Determine table engine type based on the response.
+                        result = getEngineFromResponse(response);
+                    }
+                    log.info("getTableEngineUsingShowTable ResultSet: " + rs);
                 }
-                rs.close();
-                stmt.close();
-                log.info("getTableEngineUsingShowTable ResultSet: " + rs);
                 break;
             } catch (Exception e) {
                 try {
@@ -371,15 +370,14 @@ public class DBMetadata {
             try (Statement stmt = conn.createStatement()) {
                 String showSchemaQuery = String.format("select engine_full from system.tables where name='%s' and database='%s'",
                         tableName, database);
-                ResultSet rs = stmt.executeQuery(showSchemaQuery);
-                if (rs != null && rs.next()) {
-                    String response = rs.getString(1);
-                    result = getEngineFromResponse(response);
-                } else {
-                    log.debug("Error: Table not found in system tables: " + tableName + " Database: " + database);
+                try (ResultSet rs = stmt.executeQuery(showSchemaQuery)) {
+                    if (rs != null && rs.next()) {
+                        String response = rs.getString(1);
+                        result = getEngineFromResponse(response);
+                    } else {
+                        log.debug("Error: Table not found in system tables: " + tableName + " Database: " + database);
+                    }
                 }
-                rs.close();
-                stmt.close();
             }
         } catch (Exception e) {
             log.debug("getTableEngineUsingSystemTables exception", e);
@@ -470,8 +468,8 @@ public class DBMetadata {
         String query = String.format("SELECT name AS column_name, type LIKE 'Nullable(%%' AS is_nullable " +
                 "FROM system.columns WHERE (table = '%s') AND (database = '%s')", tableName, database);
 
-        try (Statement stmt = conn.createStatement()) {
-            ResultSet rs = stmt.executeQuery(query);
+        try (Statement stmt = conn.createStatement();
+             ResultSet rs = stmt.executeQuery(query)) {
             while (rs.next()) {
                 String columnName = rs.getString("column_name");
                 boolean isNullable = rs.getBoolean("is_nullable");
@@ -514,8 +512,7 @@ public class DBMetadata {
         // Add retry logic.
         retryCount = 0;
         while (retryCount < MAX_RETRIES) {
-            try {
-                ResultSet columns = conn.getMetaData().getColumns(database, null, tableName, null);
+            try (ResultSet columns = conn.getMetaData().getColumns(database, null, tableName, null)) {
                 while (columns.next()) {
                     String columnName = columns.getString("COLUMN_NAME");
                     String typeName = columns.getString("TYPE_NAME");
@@ -535,7 +532,6 @@ public class DBMetadata {
                     }
                     result.put(columnName, typeName);
                 }
-                columns.close();
                 break;
             } catch (SQLException sq) {
                 log.error("Exception retrieving Column Metadata, retrying ({}/{}), use error.max.retries to configure",
@@ -563,14 +559,13 @@ public class DBMetadata {
     public ZoneId getServerTimeZone(Connection conn) {
         ZoneId result = ZoneId.of("UTC");
         if (conn != null) {
-            try {
+            try (PreparedStatement ps = conn.prepareStatement("SELECT timezone()");
+                 ResultSet rs = ps.executeQuery()) {
                 // Perform a query to get the server timezone
-                ResultSet rs = conn.prepareStatement("SELECT timezone()").executeQuery();
                 if (rs.next()) {
                     String serverTimeZone = rs.getString(1);
                     result = ZoneId.of(serverTimeZone);
                 }
-                rs.close();
             } catch (Exception e) {
                 log.error("Error retrieving server timezone", e);
             }
@@ -599,17 +594,14 @@ public class DBMetadata {
                         "(default_kind='ALIAS' or default_kind='MATERIALIZED')";
                 String formattedQuery = String.format(query, tableName, databaseName);
 
-                // Execute query
-                ResultSet rs = conn.createStatement().executeQuery(formattedQuery);
-
-                // Get the list of columns from rs.
-                if (rs != null) {
+                try (Statement stmt = conn.createStatement();
+                     ResultSet rs = stmt.executeQuery(formattedQuery)) {
+                    // Get the list of columns from rs.
                     while (rs.next()) {
                         String response = rs.getString(1);
                         aliasColumns.add(response);
                     }
                 }
-                rs.close();
                 break;
             } catch (Exception e) {
                 log.error("Error getting alias columns, retrying ({}/{})", retryCount,MAX_RETRIES,e);
@@ -661,10 +653,16 @@ public class DBMetadata {
         // Add retry logic.
         int retryCount = 0;
         String result = null;
-        ResultSet rs = null;
         while (retryCount < MAX_RETRIES) {
-            try {
-                rs = conn.prepareStatement(sql).executeQuery();
+            try (PreparedStatement ps = conn.prepareStatement(sql)) {
+                boolean hasResultSet = ps.execute();
+                if (hasResultSet) {
+                    try (ResultSet rs = ps.getResultSet()) {
+                        while (rs.next()) {
+                            result = rs.getString(1);
+                        }
+                    }
+                }
                 break;
             } catch (SQLException sqle) {
                 try {
@@ -681,11 +679,6 @@ public class DBMetadata {
             }
         }
 
-        if (rs != null) {
-            while(rs.next()) {
-                result = rs.getString(1);
-            }
-        }
         return result;
     }
 
@@ -703,21 +696,18 @@ public class DBMetadata {
         int retryCount = 0;
         LinkedHashMap<String, String> result = new LinkedHashMap<>();
         while (retryCount < MAX_RETRIES) {
-            try {
-                if (conn == null) {
-                    log.error("Error with DB connection");
-                    return result;
-                }
-
-                ResultSet columns = conn.getMetaData().getColumns(null, database,
-                        tableName, null);
+            if (conn == null) {
+                log.error("Error with DB connection");
+                return result;
+            }
+            try (ResultSet columns = conn.getMetaData().getColumns(
+                    null, database, tableName, null)) {
                 while (columns.next()) {
                     String columnName = columns.getString("COLUMN_NAME");
                     String typeName = columns.getString("TYPE_NAME");
 
                     result.put(columnName, typeName);
                 }
-                columns.close();
                 break;
             } catch (Exception sq) {
                 log.error("Exception retrieving Column Metadata, retrying ({}/{}),use error.max.retries to configure",
@@ -746,10 +736,9 @@ public class DBMetadata {
      */
     public void truncateTable(Connection conn, String databaseName, String tableName) throws SQLException {
         int retryCount = 0;
-        PreparedStatement ps = null;
         while(retryCount < MAX_RETRIES) {
-            try {
-                ps = conn.prepareStatement("TRUNCATE TABLE " + databaseName + "." + tableName);
+            try (PreparedStatement ps = conn.prepareStatement(
+                    "TRUNCATE TABLE " + databaseName + "." + tableName)) {
                 ps.execute();
                 break;
             } catch (SQLException e) {
