@@ -173,7 +173,12 @@ public class HikariDbSource {
         // Optional, if already in JDBC URL
         poolConfig.setConnectionTimeout(poolConnectionTimeout);
         poolConfig.setMaximumPoolSize(maxPoolSize);
-        // poolConfig.setMinimumIdle(minIdle);
+        int effectiveMinIdle = effectiveMinimumIdle(minIdle, maxPoolSize);
+        if (effectiveMinIdle != minIdle) {
+            log.warn("Clamping connection.pool.min.idle from {} to {} for database {}",
+                    minIdle, effectiveMinIdle, databaseName);
+        }
+        poolConfig.setMinimumIdle(effectiveMinIdle);
         // poolConfig.setIdleTimeout(2_000L);
         poolConfig.setMaxLifetime(maxLifetime);
         poolConfig.setDataSource(chDataSource);
@@ -186,6 +191,10 @@ public class HikariDbSource {
             dataSource.setMetricRegistry(meterRegistry);
         }
         return dataSource;
+    }
+
+    static int effectiveMinimumIdle(int minIdle, int maxPoolSize) {
+        return Math.max(0, Math.min(minIdle, maxPoolSize));
     }
 
     /**
