@@ -19,7 +19,11 @@ import org.testcontainers.junit.jupiter.Testcontainers;
 
 import java.sql.*;
 import java.time.ZoneId;
+import java.lang.reflect.Proxy;
+import java.util.Collections;
 import java.util.HashMap;
+import java.util.List;
+import java.util.concurrent.atomic.AtomicReference;
 
 @Testcontainers
 public class ClickHouseDataTypeMapperTest {
@@ -48,6 +52,88 @@ public class ClickHouseDataTypeMapperTest {
         chDataType = ClickHouseDataTypeMapper.getClickHouseDataType(Schema.Type.STRUCT, VariableScaleDecimal.LOGICAL_NAME);
         Assert.assertTrue(chDataType.name().equalsIgnoreCase("Decimal"));
 
+    }
+
+    @Test
+    public void convertArrayAcceptsEmptyListImplementation() throws SQLException {
+        AtomicReference<String> typeName = new AtomicReference<>();
+        AtomicReference<Object[]> elements = new AtomicReference<>();
+
+        boolean converted = ClickHouseDataTypeMapper.convert(
+                Schema.Type.ARRAY,
+                Schema.Type.STRING.name(),
+                Collections.emptyList(),
+                1,
+                preparedStatementCapturingArray(typeName, elements),
+                null,
+                null,
+                ZoneId.of("UTC"));
+
+        Assert.assertTrue(converted);
+        Assert.assertEquals("String", typeName.get());
+        Assert.assertArrayEquals(new Object[0], elements.get());
+    }
+
+    @Test
+    public void convertArrayAcceptsImmutableListImplementation() throws SQLException {
+        AtomicReference<String> typeName = new AtomicReference<>();
+        AtomicReference<Object[]> elements = new AtomicReference<>();
+
+        boolean converted = ClickHouseDataTypeMapper.convert(
+                Schema.Type.ARRAY,
+                Schema.Type.STRING.name(),
+                List.of("api", "post"),
+                1,
+                preparedStatementCapturingArray(typeName, elements),
+                null,
+                null,
+                ZoneId.of("UTC"));
+
+        Assert.assertTrue(converted);
+        Assert.assertEquals("String", typeName.get());
+        Assert.assertArrayEquals(new Object[]{"api", "post"}, elements.get());
+    }
+
+    private PreparedStatement preparedStatementCapturingArray(
+            AtomicReference<String> typeName,
+            AtomicReference<Object[]> elements) {
+        Connection connection = (Connection) Proxy.newProxyInstance(
+                Connection.class.getClassLoader(),
+                new Class<?>[]{Connection.class},
+                (proxy, method, args) -> {
+                    if ("createArrayOf".equals(method.getName())) {
+                        typeName.set((String) args[0]);
+                        elements.set((Object[]) args[1]);
+                        return Proxy.newProxyInstance(
+                                Array.class.getClassLoader(),
+                                new Class<?>[]{Array.class},
+                                (arrayProxy, arrayMethod, arrayArgs) ->
+                                        defaultValue(arrayMethod.getReturnType()));
+                    }
+                    return defaultValue(method.getReturnType());
+                });
+        return (PreparedStatement) Proxy.newProxyInstance(
+                PreparedStatement.class.getClassLoader(),
+                new Class<?>[]{PreparedStatement.class},
+                (proxy, method, args) -> {
+                    if ("getConnection".equals(method.getName())) {
+                        return connection;
+                    }
+                    return defaultValue(method.getReturnType());
+                });
+    }
+
+    private Object defaultValue(Class<?> returnType) {
+        if (!returnType.isPrimitive()) {
+            return null;
+        }
+        if (returnType == boolean.class) {
+            return false;
+        }
+        if (returnType == void.class) {
+            return null;
+        }
+        return 0;
     }
 
 }

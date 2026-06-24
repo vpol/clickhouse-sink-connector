@@ -463,8 +463,17 @@ public class ClickHouseDataTypeMapper {
         } else if (type == Schema.Type.ARRAY) {
             ClickHouseDataType dt = getClickHouseDataType(
                     Schema.Type.valueOf(schemaName), null);
+            Object[] arrayValue;
+            if (value instanceof Collection<?>) {
+                arrayValue = ((Collection<?>) value).toArray();
+            } else if (value != null && value.getClass().isArray()) {
+                arrayValue = (Object[]) value;
+            } else {
+                throw new IllegalArgumentException(
+                        "Unexpected type for array value");
+            }
             ps.setArray(index, ps.getConnection().createArrayOf(
-                    dt.name(), ((ArrayList) value).toArray()));
+                    dt.name(), arrayValue));
         } else {
             result = false;
         }
