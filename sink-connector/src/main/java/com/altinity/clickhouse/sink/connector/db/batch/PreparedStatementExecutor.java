@@ -313,7 +313,7 @@ public class PreparedStatementExecutor {
                         // Skipped in replication-history mode: that mode keeps its own SCD
                         // Type 2 history via ReplicationHistoryHandler, whose sorting key
                         // includes deleted_time, and it retires the old version itself.
-                        else if (replicationHistoryHandler == null && isReplacingMergeTree(engine)
+                        else if (replicationHistoryHandler == null && DBMetadata.isReplacingMergeTreeEngine(engine)
                                 && updateRelocatesSortingKey(record)) {
                             fieldMapper.insertTombstonePreparedStatement(entry.getKey().right, ps,
                                     record.getBeforeModifiedFields(), record, record.getBeforeStruct(),
@@ -366,22 +366,6 @@ public class PreparedStatementExecutor {
         });
 
         return result.get();
-    }
-
-    /**
-     * Whether the engine deduplicates by sorting key, i.e. is a
-     * ReplacingMergeTree variant.
-     *
-     * @param engine The target table engine.
-     * @return true for (Replicated)ReplacingMergeTree.
-     */
-    private boolean isReplacingMergeTree(DBMetadata.TABLE_ENGINE engine) {
-        if (engine == null) {
-            return false;
-        }
-        return engine.getEngine().equalsIgnoreCase(DBMetadata.TABLE_ENGINE.REPLACING_MERGE_TREE.getEngine())
-                || engine.getEngine().equalsIgnoreCase(
-                        DBMetadata.TABLE_ENGINE.REPLICATED_REPLACING_MERGE_TREE.getEngine());
     }
 
     /**

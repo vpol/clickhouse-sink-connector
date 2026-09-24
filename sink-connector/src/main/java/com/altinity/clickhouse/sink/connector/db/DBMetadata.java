@@ -555,9 +555,9 @@ public class DBMetadata {
         // Add retry logic.
         retryCount = 0;
         while (retryCount < MAX_RETRIES) {
-                String query = String.format(
-                        "SELECT name, type, default_kind FROM system.columns WHERE database = '%s' AND table = '%s' ORDER BY position",
-                        database, tableName);
+            String query = String.format(
+                    "SELECT name, type, default_kind FROM system.columns WHERE database = '%s' AND table = '%s' ORDER BY position",
+                    database, tableName);
             try (Statement stmt = conn.createStatement();
                  ResultSet columns = stmt.executeQuery(query)) {
                 while (columns.next()) {
@@ -870,34 +870,34 @@ public class DBMetadata {
         int retryCount = 0;
         LinkedHashMap<String, String> result = new LinkedHashMap<>();
         while (retryCount < MAX_RETRIES) {
-                if (conn == null) {
-                    log.error("Error with DB connection");
-                    return result;
-                }
+            if (conn == null) {
+                log.error("Error with DB connection");
+                return result;
+            }
 
-                // Query system.columns directly instead of
-                // DatabaseMetaData.getColumns(null, database, tableName, null).
-                //
-                // getColumns() treats its schemaPattern/tableNamePattern
-                // arguments as JDBC LIKE patterns, in which '_' matches ANY
-                // single character and '%' matches any sequence. A table whose
-                // name contains an underscore therefore also matches sibling
-                // tables: for `under_score_t`, getColumns() additionally
-                // returned the columns of `underXscore_t`, silently merging
-                // two schemas into one column map. Verified live against
-                // ClickHouse 24.8.8 with clickhouse-jdbc 0.9.8 on BOTH driver
-                // generations (V1 and V2), so this is a latent defect in the
-                // original code rather than a driver-migration regression.
-                // Underscores are extremely common in replicated MySQL table
-                // names, and a wrong column map produces wrong INSERT column
-                // lists — i.e. data corruption.
-                //
-                // system.columns uses exact equality, is driver-independent,
-                // and matches how the sibling metadata methods in this class
-                // already read column metadata.
-                String query = String.format(
-                        "SELECT name, type FROM system.columns WHERE database = '%s' AND table = '%s' ORDER BY position",
-                        database, tableName);
+            // Query system.columns directly instead of
+            // DatabaseMetaData.getColumns(null, database, tableName, null).
+            //
+            // getColumns() treats its schemaPattern/tableNamePattern
+            // arguments as JDBC LIKE patterns, in which '_' matches ANY
+            // single character and '%' matches any sequence. A table whose
+            // name contains an underscore therefore also matches sibling
+            // tables: for `under_score_t`, getColumns() additionally
+            // returned the columns of `underXscore_t`, silently merging
+            // two schemas into one column map. Verified live against
+            // ClickHouse 24.8.8 with clickhouse-jdbc 0.9.8 on BOTH driver
+            // generations (V1 and V2), so this is a latent defect in the
+            // original code rather than a driver-migration regression.
+            // Underscores are extremely common in replicated MySQL table
+            // names, and a wrong column map produces wrong INSERT column
+            // lists — i.e. data corruption.
+            //
+            // system.columns uses exact equality, is driver-independent,
+            // and matches how the sibling metadata methods in this class
+            // already read column metadata.
+            String query = String.format(
+                    "SELECT name, type FROM system.columns WHERE database = '%s' AND table = '%s' ORDER BY position",
+                    database, tableName);
             try (Statement stmt = conn.createStatement();
                  ResultSet columns = stmt.executeQuery(query)) {
                 while (columns.next()) {

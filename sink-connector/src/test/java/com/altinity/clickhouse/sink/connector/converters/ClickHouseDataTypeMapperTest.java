@@ -121,6 +121,26 @@ public class ClickHouseDataTypeMapperTest {
         Assert.assertArrayEquals(new Object[]{"api", "post"}, elements.get());
     }
 
+    @Test
+    public void convertArrayAcceptsObjectArray() throws SQLException {
+        AtomicReference<String> typeName = new AtomicReference<>();
+        AtomicReference<Object[]> elements = new AtomicReference<>();
+
+        boolean converted = ClickHouseDataTypeMapper.convert(
+                Schema.Type.ARRAY,
+                Schema.Type.STRING.name(),
+                new String[]{"api", "post"},
+                1,
+                preparedStatementCapturingArray(typeName, elements),
+                null,
+                null,
+                ZoneId.of("UTC"));
+
+        Assert.assertTrue(converted);
+        Assert.assertEquals("String", typeName.get());
+        Assert.assertArrayEquals(new Object[]{"api", "post"}, elements.get());
+    }
+
     private PreparedStatement preparedStatementCapturingArray(
             AtomicReference<String> typeName,
             AtomicReference<Object[]> elements) {

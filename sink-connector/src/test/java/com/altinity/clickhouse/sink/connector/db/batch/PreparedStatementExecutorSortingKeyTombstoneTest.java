@@ -1,6 +1,11 @@
 package com.altinity.clickhouse.sink.connector.db.batch;
 
 import com.altinity.clickhouse.sink.connector.model.ClickHouseStruct;
+import com.altinity.clickhouse.sink.connector.ClickHouseSinkConnectorConfig;
+import com.altinity.clickhouse.sink.connector.converters.ClickHouseConverter;
+import com.altinity.clickhouse.sink.connector.db.DBMetadata;
+import com.altinity.clickhouse.sink.connector.model.BlockMetaData;
+import org.apache.commons.lang3.tuple.MutablePair;
 import org.apache.kafka.connect.data.Schema;
 import org.apache.kafka.connect.data.SchemaBuilder;
 import org.apache.kafka.connect.data.Struct;
@@ -8,9 +13,14 @@ import org.junit.Assert;
 import org.junit.jupiter.api.Test;
 
 import java.time.ZoneId;
+import java.lang.reflect.Proxy;
+import java.sql.Connection;
+import java.sql.PreparedStatement;
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 
 /**
  * ReplacingMergeTree deduplicates by SORTING KEY, so an UPDATE that changes a
@@ -54,6 +64,57 @@ public class PreparedStatementExecutorSortingKeyTombstoneTest {
         record.setBeforeStruct(new Struct(ROW_SCHEMA).put("id", beforeId).put("val", beforeVal));
         record.setAfterStruct(new Struct(ROW_SCHEMA).put("id", afterId).put("val", afterVal));
         return record;
+    }
+
+    @Test
+    public void testSharedReplacingUpdateBindsOldKeyTombstoneBeforeNewRow() throws Exception {
+        for (int afterId : new int[]{1, 9}) {
+            List<Map<Integer, Object>> batches = new ArrayList<>();
+            Map<Integer, Object> bound = new HashMap<>();
+            PreparedStatement statement = (PreparedStatement) Proxy.newProxyInstance(
+                    PreparedStatement.class.getClassLoader(), new Class<?>[]{PreparedStatement.class},
+                    (proxy, method, args) -> {
+                        if (method.getName().startsWith("set") && args != null
+                                && args.length >= 2 && args[0] instanceof Integer) {
+                            bound.put((Integer) args[0], "setNull".equals(method.getName()) ? null : args[1]);
+                        } else if ("addBatch".equals(method.getName())) {
+                            batches.add(new HashMap<>(bound));
+                        } else if ("executeBatch".equals(method.getName())) {
+                            return new int[batches.size()];
+                        }
+                        return null;
+                    });
+            Connection connection = (Connection) Proxy.newProxyInstance(
+                    Connection.class.getClassLoader(), new Class<?>[]{Connection.class},
+                    (proxy, method, args) -> "prepareStatement".equals(method.getName()) ? statement : null);
+
+            ClickHouseStruct record = updateRecord(1, "before", afterId, "after");
+            record.setCdcOperation(ClickHouseConverter.CDC_OPERATION.UPDATE);
+            record.setVersion(123L);
+            record.setBeforeModifiedFields(ROW_SCHEMA.fields());
+            record.setAfterModifiedFields(ROW_SCHEMA.fields());
+            Map<String, Integer> indexes = Map.of("id", 1, "val", 2, "_version", 3, "is_deleted", 4);
+            Map<MutablePair<String, Map<String, Integer>>, List<ClickHouseStruct>> queries = new HashMap<>();
+            queries.put(MutablePair.of("INSERT INTO testdb.rows VALUES (?, ?, ?, ?)", indexes), List.of(record));
+
+            Assert.assertTrue(executorWithSortingKey(List.of("id")).addToPreparedStatementBatch(
+                    "testdb.rows", queries, new BlockMetaData(),
+                    new ClickHouseSinkConnectorConfig(Map.of(
+                            "connector.class", "io.debezium.connector.postgresql.PostgresConnector")),
+                    connection, "rows",
+                    Map.of("id", "Int32", "val", "String", "_version", "UInt64", "is_deleted", "UInt8"),
+                    DBMetadata.TABLE_ENGINE.SHARED_REPLACING_MERGE_TREE));
+
+            Assert.assertEquals(afterId == 1 ? 1 : 2, batches.size());
+            if (afterId != 1) {
+                Assert.assertEquals(1, batches.get(0).get(1));
+                Assert.assertEquals(1, batches.get(0).get(4));
+            }
+            Map<Integer, Object> liveRow = batches.get(batches.size() - 1);
+            Assert.assertEquals(afterId, liveRow.get(1));
+            Assert.assertEquals(0, liveRow.get(4));
+            Assert.assertEquals(123L, liveRow.get(3));
+        }
     }
 
     /**

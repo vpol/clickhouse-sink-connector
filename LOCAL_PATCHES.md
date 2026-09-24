@@ -80,12 +80,37 @@ git switch -c patched/<version> <version>
 git cherry-pick <previous-shared-replacing-merge-tree-commit>
 ```
 
-For this branch, `patched/2.9.1` was created from upstream tag `2.9.1` and
-cherry-picked the compatibility commit from `patched/2.7.1`:
+### Port to 2.10.3
 
-```sh
-git cherry-pick c865682c
-```
+`patched/2.10.3` retained its existing base `3c0759b1f`, including the
+post-2.10.3 upstream snapshot-heartbeat fix. All 12 commits in
+`2.9.1..patched/2.9.1` were ported in order, with their source hashes recorded
+in the cherry-pick commit messages:
+
+| Source | Patch | Adaptation |
+| --- | --- | --- |
+| `ac9fb8814` | SharedReplacingMergeTree metadata | Applied |
+| `f5a457986` | Local patch documentation | Updated for this port |
+| `c79c8cac6` | Cloud-safe JDBC settings | Retained upstream V2 property filtering, connection recovery, and pool isolation |
+| `d9a2e1031` | Debezium 3 storage keys | Retained upstream offset-table ordering |
+| `866d3463c` | Shared replacing writes | Applied common engine predicate |
+| `c6921717d` | Metadata refresh before writes | Retained sorting-key refresh and supplier when moving executor creation |
+| `5b7755bff` | Delete-marker binding with ignored deletes | Applied |
+| `709858d13` | Bounded deduplicator memory | Applied |
+| `7dec1ffb4` | Release written batches awaiting commit | Retained upstream handoff accounting and commit serialization |
+| `556213aee` | Avoid per-row schema reload; close JDBC resources | Retained exact system.columns queries and SQL retry classification |
+| `ac4bacc62` | Non-ArrayList array values | Collection support was upstream; retained Object[] support and tests |
+| `5e9121a4d` | Honor Hikari minimum idle | Applied |
+
+The new upstream sorting-key UPDATE path also uses the shared replacing-engine
+predicate, so SharedReplacingMergeTree emits the old-key tombstone when an
+UPDATE moves a row. Regression coverage verifies both changed and unchanged
+sorting keys.
+
+Both module POMs already select ClickHouse JDBC **0.9.8** in the target base.
+The default is the V2 implementation; `clickhouse.jdbc.v1=true` explicitly opts
+into the legacy implementation bundled inside 0.9.8. No 0.6.5 dependency is
+required by the port.
 
 To inspect the local delta for a patched branch:
 
