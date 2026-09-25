@@ -43,6 +43,22 @@ in the original batch and update block metadata so the normal ordered offset
 commit path still acknowledges them after the batch succeeds. INSERT, UPDATE,
 TRUNCATE, and `ignore_delete=false` keep their existing behavior.
 
+### Complete data batches followed by tombstones or control records
+
+Mark the final parsed data record as the end of the writer batch, even when
+Debezium's source batch ends with a tombstone or another record that produces
+no row. Otherwise the writer calls `markProcessed` for an ignored DELETE but
+never `markBatchFinished`, leaving its durable offset behind on an idle stream.
+Completion still runs through the writer after successful processing and uses
+the data record's offset, not a later control record's position. The embedded
+engine already uses `OffsetCommitPolicy.always()`.
+
+`TrailingControlBatchCompletionTest` covers mixed operations, multiple deletes,
+snapshot rows, control-only batches, retries, commit errors, and routed groups
+waiting for older in-flight work. The `clickhouse-sink-test` live matrix checks
+idle delete offset persistence before a forced restart and later INSERT/UPDATE
+events in synchronous, asynchronous single-worker, and routed modes.
+
 ### ClickHouse Cloud JDBC Settings
 
 This compatibility patch prevents startup failures on ClickHouse Cloud where

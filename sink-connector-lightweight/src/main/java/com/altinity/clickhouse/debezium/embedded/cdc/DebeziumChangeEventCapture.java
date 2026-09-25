@@ -1222,6 +1222,13 @@ public class DebeziumChangeEventCapture {
         //addVersion(batch);
 
         if (batch.size() > 0) {
+            // The final source record may be a tombstone or control record
+            // that never reaches the writer. Finish at the last data record
+            // instead, after successful persistence, so an idle delete does
+            // not wait for another source event to flush its offset. Retain
+            // that data record's offset; a later control offset must not be
+            // acknowledged ahead of outstanding writes.
+            batch.get(batch.size() - 1).setLastRecordInBatch(true);
             appendToRecords(batch, config);
             handedOffRows = true;
         }
