@@ -213,6 +213,13 @@ public class PreparedStatementExecutor {
                         log.error("**** ERROR: updating Prometheus", e);
                     }
 
+                    // Keep ignored deletes in the original batch for ordered offset
+                    // commits, but never bind their potentially key-only before-image.
+                    if (config.getBoolean(ClickHouseSinkConnectorConfigVariables.IGNORE_DELETE.toString())
+                            && record.getCdcOperation() == ClickHouseConverter.CDC_OPERATION.DELETE) {
+                        continue;
+                    }
+
                     if (record.getCdcOperation().getOperation().equalsIgnoreCase(ClickHouseConverter.CDC_OPERATION.TRUNCATE.getOperation())) {
                         // A TRUNCATE must be applied at its binlog position, not at the
                         // end of the batch. Rows staged before it belong to the

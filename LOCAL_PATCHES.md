@@ -33,6 +33,16 @@ Patch shape:
 - Keep binding the replacing delete column to the not-deleted value for
   non-delete rows, even when `ignore_delete=true`.
 
+### Ignore delete payloads before JDBC binding
+
+With `ignore_delete=true`, skip DELETE payload binding and all delete writes
+in `PreparedStatementExecutor`. PostgreSQL `REPLICA IDENTITY DEFAULT` supplies
+only key values on deletes, so binding an absent non-key UUID can fail even
+when the delete marker would be set to the not-deleted value. Keep these events
+in the original batch and update block metadata so the normal ordered offset
+commit path still acknowledges them after the batch succeeds. INSERT, UPDATE,
+TRUNCATE, and `ignore_delete=false` keep their existing behavior.
+
 ### ClickHouse Cloud JDBC Settings
 
 This compatibility patch prevents startup failures on ClickHouse Cloud where
