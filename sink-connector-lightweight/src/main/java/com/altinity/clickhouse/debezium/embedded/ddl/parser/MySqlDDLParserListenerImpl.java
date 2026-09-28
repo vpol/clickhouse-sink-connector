@@ -388,6 +388,13 @@ public class MySqlDDLParserListenerImpl extends MySQLDDLParserBaseListener {
         }
 
         String isDeletedColumn = IS_DELETED_COLUMN;
+        String deleteColumnSetting = ClickHouseSinkConnectorConfigVariables.REPLACING_MERGE_TREE_DELETE_COLUMN.toString();
+        String configuredDeleteColumn = config.originals().containsKey(deleteColumnSetting)
+                ? config.getString(deleteColumnSetting) : null;
+        boolean customDeleteColumn = configuredDeleteColumn != null && !configuredDeleteColumn.isEmpty();
+        if (customDeleteColumn) {
+            isDeletedColumn = configuredDeleteColumn;
+        }
 
         // Iterate through columnNames and match isDeletedColumn with elements in columnNames.
         for (String columnName: columnNames) {
@@ -395,6 +402,9 @@ public class MySqlDDLParserListenerImpl extends MySQLDDLParserBaseListener {
                 columnName = columnName.replace("`", "");
             }
             if (columnName.equalsIgnoreCase(isDeletedColumn)) {
+                if (customDeleteColumn) {
+                    throw new IllegalArgumentException("Configured delete column conflicts with source column: " + isDeletedColumn);
+                }
                 isDeletedColumn = "_" + IS_DELETED_COLUMN;
                 break;
             }

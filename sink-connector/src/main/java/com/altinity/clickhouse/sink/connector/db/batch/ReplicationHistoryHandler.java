@@ -2,9 +2,9 @@ package com.altinity.clickhouse.sink.connector.db.batch;
 
 import com.altinity.clickhouse.sink.connector.ClickHouseSinkConnectorConfig;
 import com.altinity.clickhouse.sink.connector.ClickHouseSinkConnectorConfigVariables;
-import com.altinity.clickhouse.sink.connector.common.SnowFlakeId;
 import com.altinity.clickhouse.sink.connector.converters.ClickHouseConverter;
 import com.altinity.clickhouse.sink.connector.converters.DebeziumConverter;
+import com.altinity.clickhouse.sink.connector.db.ClickHouseDbConstants;
 import com.altinity.clickhouse.sink.connector.db.DBMetadata;
 import com.altinity.clickhouse.sink.connector.db.QueryFormatter;
 import com.altinity.clickhouse.sink.connector.metadata.DataTypeRange;
@@ -20,6 +20,8 @@ import org.apache.logging.log4j.Logger;
 import java.sql.Connection;
 import java.sql.PreparedStatement;
 import java.time.ZoneId;
+import java.util.Collections;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 
@@ -41,6 +43,8 @@ public class ReplicationHistoryHandler {
     private final DBMetadata dbMetadata;
     private final ZoneId sourceTimeZone;
     private final ZoneId serverTimeZone;
+    private final String deleteColumn;
+    private final boolean useSnowflakeId;
     /**
      * Creates a new ReplicationHistoryHandler with default dependencies (creates its own {@link DBMetadata}).
      *
@@ -60,8 +64,20 @@ public class ReplicationHistoryHandler {
      * @param dbMetadata Shared database metadata (e.g. same instance as {@code PreparedStatementExecutor}'s batch metadata)
      */
     public ReplicationHistoryHandler(ClickHouseSinkConnectorConfig config, ZoneId serverTimeZone, DBMetadata dbMetadata) {
+        this(config, serverTimeZone, dbMetadata,
+                config.originals().containsKey(ClickHouseSinkConnectorConfigVariables.REPLACING_MERGE_TREE_DELETE_COLUMN.toString())
+                        ? config.getString(ClickHouseSinkConnectorConfigVariables.REPLACING_MERGE_TREE_DELETE_COLUMN.toString())
+                        : ClickHouseDbConstants.IS_DELETED_COLUMN);
+    }
+
+    /** Uses the same resolved table-engine delete column as the field mapper. */
+    public ReplicationHistoryHandler(ClickHouseSinkConnectorConfig config, ZoneId serverTimeZone,
+                                     DBMetadata dbMetadata, String deleteColumn) {
         this.queryFormatter = new QueryFormatter();
         this.dbMetadata = dbMetadata;
+        this.deleteColumn = deleteColumn == null || deleteColumn.isEmpty()
+                ? ClickHouseDbConstants.IS_DELETED_COLUMN : deleteColumn;
+        this.useSnowflakeId = config.getBoolean(ClickHouseSinkConnectorConfigVariables.SNOWFLAKE_ID.toString());
 
         String sourceTz = "UTC";
         if (config.getString(ClickHouseSinkConnectorConfigVariables.SOURCE_DATETIME_TIMEZONE.toString()) != null) {
@@ -86,6 +102,8 @@ public class ReplicationHistoryHandler {
         this.dbMetadata = dbMetadata;
         this.sourceTimeZone = ZoneId.of("UTC");
         this.serverTimeZone = ZoneId.of("UTC");
+        this.deleteColumn = ClickHouseDbConstants.IS_DELETED_COLUMN;
+        this.useSnowflakeId = true;
     }
 
     /**
@@ -99,29 +117,40 @@ public class ReplicationHistoryHandler {
         String validToMax = DebeziumConverter.TimestampConverter.convertWithoutTimeZoneAdjustment(DataTypeRange.DATETIME32_MAX_TTL * 1000, ClickHouseDataType.DateTime,
                 sourceTimeZone, serverTimeZone);
 
-        String binlogRecordTimestamp = DebeziumConverter.TimestampConverter.convertWithoutTimeZoneAdjustment(record.getTsSec() * 1000, ClickHouseDataType.DateTime,
+        String binlogRecordTimestamp = DebeziumConverter.TimestampConverter.convertWithoutTimeZoneAdjustment(record.getSourceTimestampMillis(), ClickHouseDataType.DateTime,
                 sourceTimeZone, serverTimeZone);
 
-        // Generate unique version using snowflake algorithm
-        long version = SnowFlakeId.generate(record.getTs_ms(), record.getGtid(), false);
+        // Use the same ordering as plain INSERTs. Independently generating a
+        // Snowflake version here makes PostgreSQL DELETEs outrank later re-INSERTs.
+        if (record.getVersion() == -1) {
+            record.calculateVersion(useSnowflakeId);
+        }
+        if (record.getVersion() <= 0) {
+            throw new IllegalStateException("Cannot derive a positive version for replication history");
+        }
+        // The formatter reserves version + 1 for the new active row/delete marker.
+        // That must equal this event's version, not consume the next event's value.
+        long version = record.getVersion() - 1;
 
-        // Get the primary key column name and its value from the record
-        String primaryKeyColumnName = record.getPrimaryKey().get(0);
-
-        Object primaryKeyValue = null;
-        Struct afterStruct = record.getAfterStruct();
-        if(afterStruct == null) {
-            primaryKeyValue = record.getBeforeStruct().get(primaryKeyColumnName);
-        } else {
-            primaryKeyValue = afterStruct.get(primaryKeyColumnName);
+        if (record.getPrimaryKey() == null || record.getPrimaryKey().isEmpty()) {
+            throw new IllegalArgumentException("Replication history requires a primary key");
+        }
+        // Close the old row when an UPDATE changes a primary-key value.
+        Struct keyStruct = record.getBeforeStruct() != null
+                ? record.getBeforeStruct() : record.getAfterStruct();
+        Map<String, Object> primaryKeyValues = new LinkedHashMap<>();
+        for (String column : record.getPrimaryKey()) {
+            if (keyStruct == null || keyStruct.schema().field(column) == null || keyStruct.get(column) == null) {
+                throw new IllegalArgumentException("Missing replication history primary-key value for " + column);
+            }
+            primaryKeyValues.put(column, keyStruct.get(column));
         }
 
         return new UpdateQueryParams(
                 validToMax,
                 binlogRecordTimestamp,
                 version,
-                primaryKeyColumnName,
-                primaryKeyValue,
+                primaryKeyValues,
                 record.getCdcOperation()
         );
     }
@@ -144,13 +173,13 @@ public class ReplicationHistoryHandler {
         return queryFormatter.getInsertQueryForUpdate(
                 tableName,
                 columnToDataTypeMap,
-                params.getPrimaryKeyColumnName(),
-                params.getPrimaryKeyValue(),
+                params.getPrimaryKeyValues(),
                 params.getValidToMax(),
                 params.getBinlogRecordTimestamp(),
                 params.getVersion(),
                 params.getCdcOperation(),
-                serverTimeZone.getId()
+                serverTimeZone.getId(),
+                deleteColumn
         );
     }
 
@@ -171,12 +200,12 @@ public class ReplicationHistoryHandler {
         return queryFormatter.getInsertQueryForDelete(
                 tableName,
                 columnToDataTypeMap,
-                params.getPrimaryKeyColumnName(),
-                params.getPrimaryKeyValue(),
+                params.getPrimaryKeyValues(),
                 params.getValidToMax(),
                 params.getBinlogRecordTimestamp(),
                 params.getVersion(),
-                serverTimeZone.getId()
+                serverTimeZone.getId(),
+                deleteColumn
         );
     }
 
@@ -270,8 +299,7 @@ public class ReplicationHistoryHandler {
         private final String validToMax;
         private final String binlogRecordTimestamp;
         private final long version;
-        private final String primaryKeyColumnName;
-        private final Object primaryKeyValue;
+        private final Map<String, Object> primaryKeyValues;
         private final ClickHouseConverter.CDC_OPERATION cdcOperation;
 
         public UpdateQueryParams(
@@ -281,11 +309,17 @@ public class ReplicationHistoryHandler {
                 String primaryKeyColumnName,
                 Object primaryKeyValue,
                 ClickHouseConverter.CDC_OPERATION cdcOperation) {
+            this(validToMax, binlogRecordTimestamp, version,
+                    Collections.singletonMap(primaryKeyColumnName, primaryKeyValue), cdcOperation);
+        }
+
+        public UpdateQueryParams(String validToMax, String binlogRecordTimestamp, long version,
+                                 Map<String, Object> primaryKeyValues,
+                                 ClickHouseConverter.CDC_OPERATION cdcOperation) {
             this.validToMax = validToMax;
             this.binlogRecordTimestamp = binlogRecordTimestamp;
             this.version = version;
-            this.primaryKeyColumnName = primaryKeyColumnName;
-            this.primaryKeyValue = primaryKeyValue;
+            this.primaryKeyValues = Collections.unmodifiableMap(new LinkedHashMap<>(primaryKeyValues));
             this.cdcOperation = cdcOperation;
         }
 
@@ -301,12 +335,8 @@ public class ReplicationHistoryHandler {
             return version;
         }
 
-        public String getPrimaryKeyColumnName() {
-            return primaryKeyColumnName;
-        }
-
-        public Object getPrimaryKeyValue() {
-            return primaryKeyValue;
+        public Map<String, Object> getPrimaryKeyValues() {
+            return primaryKeyValues;
         }
 
         public ClickHouseConverter.CDC_OPERATION getCdcOperation() {
@@ -319,11 +349,9 @@ public class ReplicationHistoryHandler {
                     "validToMax='" + validToMax + '\'' +
                     ", binlogRecordTimestamp='" + binlogRecordTimestamp + '\'' +
                     ", version=" + version +
-                    ", primaryKeyColumnName='" + primaryKeyColumnName + '\'' +
-                    ", primaryKeyValue=" + primaryKeyValue +
+                    ", primaryKeyValues=" + primaryKeyValues +
                     ", cdcOperation=" + cdcOperation +
                     '}';
         }
     }
 }
-

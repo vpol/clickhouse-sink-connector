@@ -815,6 +815,27 @@ public class ClickHouseStruct {
     }
 
     /**
+     * Timestamp used for temporal validity boundaries. MySQL provides ts_sec;
+     * PostgreSQL provides source.ts_ms instead. Snapshots can have a zero source
+     * timestamp, in which case the envelope's snapshot-read timestamp is used.
+     */
+    public long getSourceTimestampMillis() {
+        if (tsSec >= 0) {
+            return tsSec * 1000;
+        }
+        if (ts_ms > 0) {
+            return ts_ms;
+        }
+        if (debezium_ts_ms > 0) {
+            return debezium_ts_ms;
+        }
+        if (timestamp != null && timestamp > 0) {
+            return timestamp;
+        }
+        throw new IllegalStateException("Cannot derive timestamp for replication history");
+    }
+
+    /**
      * Calculates and sets the version based on gtid, sequenceNumber, or lsn.
      * Uses SnowFlakeId algorithm if useSnowflakeId is true and gtid is available.
      *

@@ -89,4 +89,26 @@ public class ClickHouseAutoCreateTableTest extends com.altinity.clickhouse.sink.
         Assert.assertFalse(act.isPrimaryKeyColumnPresent(primaryKeys2, columnToDataTypesMap));
     }
 
+    @Test
+    public void temporalTableKeepsBusinessDeleteFlagSeparate() {
+        var sourceSchema = org.apache.kafka.connect.data.SchemaBuilder.struct()
+                .field("id", org.apache.kafka.connect.data.Schema.STRING_SCHEMA)
+                .field("is_deleted", org.apache.kafka.connect.data.Schema.INT8_SCHEMA).build();
+        var types = new java.util.LinkedHashMap<String, String>();
+        types.put("id", "String");
+        types.put("is_deleted", "Int8");
+        var config = new ClickHouseSinkConnectorConfig(Map.of("replication.history.enable", "true",
+                "replacingmergetree.delete.column", "_is_deleted"));
+        var fields = sourceSchema.fields().toArray(new org.apache.kafka.connect.data.Field[0]);
+        var creator = new ClickHouseAutoCreateTable();
+        String query = creator.createTableSyntax(new ArrayList<>(java.util.List.of("id")), "accounts", "history",
+                fields, types, true, false, "_is_deleted", config);
+        Assert.assertTrue(query.contains("`is_deleted` Int8 NOT NULL"));
+        Assert.assertTrue(query.contains("`_is_deleted` UInt8"));
+        Assert.assertTrue(query.contains("ReplacingMergeTree(_version,_is_deleted)"));
+        org.junit.jupiter.api.Assertions.assertThrows(IllegalArgumentException.class,
+                () -> creator.createTableSyntax(new ArrayList<>(java.util.List.of("id")), "accounts", "history",
+                        fields, types, true, false, "is_deleted", config));
+    }
+
 }

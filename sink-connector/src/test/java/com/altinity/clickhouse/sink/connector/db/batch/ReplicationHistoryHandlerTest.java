@@ -113,10 +113,7 @@ public class ReplicationHistoryHandlerTest {
 
         // Verify the params
         Assert.assertNotNull("Params should not be null", params);
-        Assert.assertEquals("Primary key column should be employeeNumber", 
-                "employeeNumber", params.getPrimaryKeyColumnName());
-        Assert.assertEquals("Primary key value should be 1001", 
-                1001, params.getPrimaryKeyValue());
+        Assert.assertEquals(Map.of("employeeNumber", 1001), params.getPrimaryKeyValues());
         Assert.assertNotNull("ValidToMax should not be null", params.getValidToMax());
         Assert.assertNotNull("BinlogRecordTimestamp should not be null", 
                 params.getBinlogRecordTimestamp());
@@ -240,10 +237,8 @@ public class ReplicationHistoryHandlerTest {
         Assert.assertTrue("toString should contain binlogRecordTimestamp", 
                 toString.contains("binlogRecordTimestamp"));
         Assert.assertTrue("toString should contain version", toString.contains("version"));
-        Assert.assertTrue("toString should contain primaryKeyColumnName", 
-                toString.contains("primaryKeyColumnName"));
-        Assert.assertTrue("toString should contain primaryKeyValue", 
-                toString.contains("primaryKeyValue"));
+        Assert.assertTrue("toString should contain primaryKeyValues",
+                toString.contains("primaryKeyValues"));
         Assert.assertTrue("toString should contain cdcOperation", toString.contains("cdcOperation"));
 
         System.out.println("UpdateQueryParams.toString(): " + toString);
@@ -329,8 +324,7 @@ public class ReplicationHistoryHandlerTest {
         ReplicationHistoryHandler.UpdateQueryParams params = handler.buildUpdateQueryParams(record);
 
         // Verify params
-        Assert.assertEquals("employeeNumber", params.getPrimaryKeyColumnName());
-        Assert.assertEquals(1001, params.getPrimaryKeyValue());
+        Assert.assertEquals(Map.of("employeeNumber", 1001), params.getPrimaryKeyValues());
         Assert.assertEquals(ClickHouseConverter.CDC_OPERATION.UPDATE, params.getCdcOperation());
 
         // Verify the record has both before and after structs

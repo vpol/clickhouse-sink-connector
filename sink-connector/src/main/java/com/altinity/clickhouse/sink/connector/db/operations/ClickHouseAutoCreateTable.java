@@ -161,6 +161,13 @@ public class ClickHouseAutoCreateTable
         if (rmtDeleteColumn != null && !rmtDeleteColumn.isEmpty()) {
             isDeletedColumn = rmtDeleteColumn;
         }
+        if (config.getBoolean(ClickHouseSinkConnectorConfigVariables.REPLICATION_HISTORY_ENABLE.toString())) {
+            for (String sourceColumn : columnToDataTypesMap.keySet()) {
+                if (sourceColumn.equalsIgnoreCase(isDeletedColumn)) {
+                    throw new IllegalArgumentException("Configured delete column conflicts with source column: " + isDeletedColumn);
+                }
+            }
+        }
         
 
         // If Replication history is enabled, add the temporal columns

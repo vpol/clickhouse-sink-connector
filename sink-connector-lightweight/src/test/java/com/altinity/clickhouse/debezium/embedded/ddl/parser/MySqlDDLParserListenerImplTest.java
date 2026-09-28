@@ -42,6 +42,22 @@ public class MySqlDDLParserListenerImplTest {
         Assert.assertTrue("CREATE TABLE if not exists employees.example(options Nullable(String),`_version` UInt64,`is_deleted` UInt8) Engine=ReplacingMergeTree(_version,is_deleted) ORDER BY tuple()".equalsIgnoreCase(clickHouseQuery.toString()));
         ;
     }
+
+    @ParameterizedTest
+    @org.junit.jupiter.params.provider.ValueSource(strings = {"_is_deleted", "history_deleted"})
+    public void temporalCreateTableRespectsConfiguredDeleteColumn(String deleteColumn) {
+        var config = new ClickHouseSinkConnectorConfig(Map.of("replication.history.enable", "true",
+                "replacingmergetree.delete.column", deleteColumn));
+        var parser = new MySQLDDLParserService(config, "employees");
+        StringBuffer output = new StringBuffer();
+        parser.parseSql("CREATE TABLE accounts (id INT NOT NULL, is_deleted TINYINT NOT NULL, PRIMARY KEY(id))",
+                "accounts", output);
+        String sql = output.toString();
+        Assert.assertTrue(sql, sql.contains("is_deleted Int8 NOT NULL"));
+        Assert.assertTrue(sql, sql.contains("`" + deleteColumn + "` UInt8"));
+        Assert.assertTrue(sql, sql.contains("ReplacingMergeTree(_version," + deleteColumn + ")"));
+        Assert.assertTrue(sql, sql.contains("`_valid_from`"));
+    }
     @Test
     public void testCreateTableWithEnum() {
         String createQuery = "CREATE TABLE employees_predated (\n" +

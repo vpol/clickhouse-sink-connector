@@ -350,6 +350,31 @@ replication.history.ttl=30
 clickhouse.datetime.timezone=America/Chicago
 ```
 
+Temporal UPDATE and DELETE lookups match every column of the source primary key.
+Tables must have a primary key, and change events must contain all its values.
+History writes use the same event version sequence as normal inserts, so a later
+re-insert can supersede a deletion marker. PostgreSQL validity timestamps use the
+source timestamp in milliseconds, with the envelope read time for snapshots.
+Existing history is not rewritten by an upgrade. PostgreSQL history tables that
+already contain the old, independently generated Snowflake versions need to be
+rebuilt or backfilled with consistent versions before resuming into those tables;
+otherwise old markers can still outrank new events. Previously written 1970
+validity timestamps also require a rebuild/backfill.
+
+If the source has a business column named `is_deleted`, use a separate connector
+delete flag:
+
+```properties
+replacingmergetree.delete.column=_is_deleted
+```
+
+This existing setting also applies to temporal mode. The connector preserves the
+source `is_deleted` values and uses `_is_deleted` for history markers and filters.
+For existing tables, the runtime uses the delete column declared in the table's
+ReplacingMergeTree engine. Changing the configuration does not rename an existing
+column or migrate its data; the target schema and engine must use the intended
+delete column. The configured name must not collide with a source column.
+
 ### Deployment Recommendations
 
 **Rationale for Separate Instance:**  

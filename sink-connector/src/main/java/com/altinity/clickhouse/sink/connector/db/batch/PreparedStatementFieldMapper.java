@@ -53,8 +53,12 @@ public class PreparedStatementFieldMapper {
      * @return true when the column is intentionally not a bind parameter
      */
     static boolean isUnboundByDesign(String columnName) {
+        return isUnboundByDesign(columnName, IS_DELETED_COLUMN);
+    }
+
+    static boolean isUnboundByDesign(String columnName, String deleteColumn) {
         return VERSION_COLUMN.equalsIgnoreCase(columnName)
-                || IS_DELETED_COLUMN.equalsIgnoreCase(columnName)
+                || (deleteColumn != null && deleteColumn.equalsIgnoreCase(columnName))
                 || OPERATION_COLUMN.equalsIgnoreCase(columnName)
                 || SIGN_COLUMN.equalsIgnoreCase(columnName);
     }
@@ -199,7 +203,7 @@ public class PreparedStatementFieldMapper {
                 // expected and must not be reported as an error -- on a busy
                 // history-mode connector that logged tens of thousands of
                 // spurious ERROR lines and buried the real ones.
-                if (isUnboundByDesign(colName)) {
+                if (isUnboundByDesign(colName, replacingMergeTreeDeleteColumn)) {
                     log.debug("Column {} is emitted as a SQL literal; no parameter binding required.", colName);
                 } else if (!recordCarries(fields, colName)) {
                     // The record does not carry this column, so createColumns
@@ -446,7 +450,7 @@ public class PreparedStatementFieldMapper {
         if (columnNameToDataTypeMap.containsKey(DELETED_TIME_COLUMN) && columnNameToIndexMap.containsKey(DELETED_TIME_COLUMN)) {
             if (record.getCdcOperation().getOperation().equalsIgnoreCase(ClickHouseConverter.CDC_OPERATION.DELETE.getOperation())) {
                 ps.setString(columnNameToIndexMap.get(DELETED_TIME_COLUMN),
-                        DebeziumConverter.TimestampConverter.convertWithoutTimeZoneAdjustment(record.getTsSec() * 1000, ClickHouseDataType.DateTime,
+                        DebeziumConverter.TimestampConverter.convertWithoutTimeZoneAdjustment(record.getSourceTimestampMillis(), ClickHouseDataType.DateTime,
                                 ZoneId.of(sourceTimeZone), serverTimeZone));
             } else if(record.getCdcOperation().getOperation().equalsIgnoreCase(ClickHouseConverter.CDC_OPERATION.UPDATE.getOperation())) {
                 ps.setString(columnNameToIndexMap.get(DELETED_TIME_COLUMN),
@@ -465,11 +469,11 @@ public class PreparedStatementFieldMapper {
             if (record.getCdcOperation().getOperation().equalsIgnoreCase(ClickHouseConverter.CDC_OPERATION.DELETE.getOperation()) ||
                     record.getCdcOperation().getOperation().equalsIgnoreCase(ClickHouseConverter.CDC_OPERATION.UPDATE.getOperation())) {
                 ps.setString(columnNameToIndexMap.get(DELETED_FROM_TIME_COLUMN),
-                        DebeziumConverter.TimestampConverter.convertWithoutTimeZoneAdjustment(record.getTsSec() * 1000, ClickHouseDataType.DateTime,
+                        DebeziumConverter.TimestampConverter.convertWithoutTimeZoneAdjustment(record.getSourceTimestampMillis(), ClickHouseDataType.DateTime,
                                 ZoneId.of(sourceTimeZone), serverTimeZone));
             } else {
                 ps.setString(columnNameToIndexMap.get(DELETED_FROM_TIME_COLUMN),
-                        DebeziumConverter.TimestampConverter.convertWithoutTimeZoneAdjustment(record.getTsSec() * 1000, ClickHouseDataType.DateTime,
+                        DebeziumConverter.TimestampConverter.convertWithoutTimeZoneAdjustment(record.getSourceTimestampMillis(), ClickHouseDataType.DateTime,
                                 ZoneId.of(sourceTimeZone), serverTimeZone));
             }
         }
