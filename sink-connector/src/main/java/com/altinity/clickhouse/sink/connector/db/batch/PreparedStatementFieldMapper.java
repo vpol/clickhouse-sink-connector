@@ -12,6 +12,7 @@ import com.altinity.clickhouse.sink.connector.model.ClickHouseStruct;
 import com.altinity.clickhouse.sink.connector.model.KafkaMetaData;
 import com.clickhouse.data.ClickHouseColumn;
 import com.clickhouse.data.ClickHouseDataType;
+import io.debezium.data.VariableScaleDecimal;
 import org.apache.kafka.connect.data.Field;
 import org.apache.kafka.connect.data.Schema;
 import org.apache.kafka.connect.data.Struct;
@@ -20,6 +21,7 @@ import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 
 import java.sql.PreparedStatement;
+import java.math.BigDecimal;
 import java.sql.Types;
 import java.time.ZoneId;
 import java.util.List;
@@ -176,6 +178,22 @@ public class PreparedStatementFieldMapper {
                                         ClickHouseSinkConnectorConfig config,
                                         Map<String, String> columnNameToDataTypeMap,
                                         DBMetadata.TABLE_ENGINE engine, String tableName) throws Exception {
+        insertPreparedStatement(columnNameToIndexMap, ps, fields, record, struct, beforeSection,
+                config, columnNameToDataTypeMap, engine, tableName, false);
+    }
+
+    /**
+     * For INSERT SELECT expressions, bind decimals as strings inside the formatter's
+     * explicit CAST. Bare decimal JDBC literals are parsed as Float64 by ClickHouse.
+     * Ordinary row inserts retain their native decimal binding.
+     */
+    public void insertPreparedStatement(Map<String, Integer> columnNameToIndexMap,
+                                        PreparedStatement ps, List<Field> fields,
+                                        ClickHouseStruct record, Struct struct, boolean beforeSection,
+                                        ClickHouseSinkConnectorConfig config,
+                                        Map<String, String> columnNameToDataTypeMap,
+                                        DBMetadata.TABLE_ENGINE engine, String tableName,
+                                        boolean decimalExpressions) throws Exception {
 
         // Iterate through the column names and map the values to their indices in the prepared statement.
         for (Map.Entry<String, String> entry : columnNameToDataTypeMap.entrySet()) {
@@ -276,6 +294,16 @@ public class PreparedStatementFieldMapper {
             }
             // This will throw an exception, unknown data type.
             ClickHouseDataType chDataType = getClickHouseDataType(colName, columnNameToDataTypeMap);
+            if (decimalExpressions && columnNameToDataTypeMap.get(colName).toUpperCase(java.util.Locale.ROOT).contains("DECIMAL")) {
+                BigDecimal decimal = value instanceof BigDecimal ? (BigDecimal) value : null;
+                if (VariableScaleDecimal.LOGICAL_NAME.equals(schemaName) && value instanceof Struct) {
+                    decimal = ClickHouseDataTypeMapper.variableScaleDecimalValue((Struct) value);
+                }
+                if (decimal != null) {
+                    ps.setString(index, decimal.toPlainString());
+                    continue;
+                }
+            }
             if (!ClickHouseDataTypeMapper.convert(type, schemaName, value, index, ps, config, chDataType, serverTimeZone)) {
                 log.error(String.format("**** DATA TYPE NOT HANDLED type(%s), name(%s), column name(%s)", type.toString(),
                         schemaName, colName));

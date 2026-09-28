@@ -176,7 +176,7 @@ public class QueryFormatter {
             return "toDate32(?)";
         } else if (upperDataType.contains("DATE")) {
             return "toDate(?)";
-        } else if (upperDataType.contains("DECIMAL")) {
+        } else if (upperDataType.contains("DECIMAL") || upperDataType.contains("UUID")) {
             return "CAST(?, '" + dataType + "')";
         }
         return "?";
@@ -221,6 +221,11 @@ public class QueryFormatter {
         
         // Check if the data type is a string type
         String upperDataType = dataType.toUpperCase();
+        if (upperDataType.contains("DECIMAL")) {
+            // A bare fractional SQL literal is parsed as Float64 and can match
+            // the wrong key. Cast a decimal string to preserve every digit.
+            return formatLiteralForSql(value, dataType);
+        }
         if (upperDataType.contains("STRING") || upperDataType.contains("ENUM") || upperDataType.contains("UUID")) {
             // Quote string types
             return "'" + value.toString().replace("\\", "\\\\").replace("'", "''") + "'";

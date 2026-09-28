@@ -234,6 +234,26 @@ public class ClickHouseDataTypeMapper {
     }
 
     /**
+     * Decodes PostgreSQL unconstrained NUMERIC for both row writes and key lookups.
+     * Read only the buffer's remaining bytes without changing its position or limit.
+     */
+    public static BigDecimal variableScaleDecimalValue(Struct decimalValue) {
+        Object encoded = decimalValue.get("value");
+        byte[] bytes;
+        if (encoded instanceof ByteBuffer) {
+            ByteBuffer buffer = ((ByteBuffer) encoded).duplicate();
+            bytes = new byte[buffer.remaining()];
+            buffer.get(bytes);
+        } else if (encoded instanceof byte[]) {
+            bytes = (byte[]) encoded;
+        } else {
+            throw new IllegalArgumentException("Unexpected type for variable-scale decimal value");
+        }
+        BigDecimal value = new BigDecimal(new BigInteger(bytes), decimalValue.getInt32("scale"));
+        return new DebeziumConverter.BigDecimalConverter().truncate(value);
+    }
+
+    /**
      * Converts a given value into the appropriate ClickHouse type
      * based on the Kafka Connect schema type and logical name.
      *
@@ -509,32 +529,7 @@ public class ClickHouseDataTypeMapper {
                 && schemaName.equalsIgnoreCase(
                 VariableScaleDecimal.LOGICAL_NAME)) {
             if (value instanceof Struct) {
-                Struct decimalValue = (Struct) value;
-                Object scale = decimalValue.get("scale");
-                Object unscaledValueObject = decimalValue.get("value");
-                byte[] unscaledValueBytes;
-                if (unscaledValueObject instanceof ByteBuffer) {
-                    ByteBuffer unscaledByteBuffer =
-                            (ByteBuffer) unscaledValueObject;
-                    unscaledValueBytes =
-                            new byte[unscaledByteBuffer.remaining()];
-                    unscaledByteBuffer.get(unscaledValueBytes);
-                    unscaledByteBuffer.rewind();
-                } else if (unscaledValueObject instanceof byte[]) {
-                    unscaledValueBytes =
-                            (byte[]) unscaledValueObject;
-                } else {
-                    // Handle unexpected type
-                    throw new IllegalArgumentException(
-                            "Unexpected type for unscaled value");
-                }
-                BigDecimal bigDecimal = new BigDecimal(
-                        new BigInteger(unscaledValueBytes),
-                        (Integer) scale);
-                BigDecimal truncated =
-                        new DebeziumConverter.BigDecimalConverter()
-                                .truncate(bigDecimal);
-                ps.setBigDecimal(index, truncated);
+                ps.setBigDecimal(index, variableScaleDecimalValue((Struct) value));
             } else {
                 ps.setBigDecimal(index, new BigDecimal(0));
             }

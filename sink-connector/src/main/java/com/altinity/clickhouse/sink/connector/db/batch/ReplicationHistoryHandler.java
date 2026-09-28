@@ -3,6 +3,7 @@ package com.altinity.clickhouse.sink.connector.db.batch;
 import com.altinity.clickhouse.sink.connector.ClickHouseSinkConnectorConfig;
 import com.altinity.clickhouse.sink.connector.ClickHouseSinkConnectorConfigVariables;
 import com.altinity.clickhouse.sink.connector.converters.ClickHouseConverter;
+import com.altinity.clickhouse.sink.connector.converters.ClickHouseDataTypeMapper;
 import com.altinity.clickhouse.sink.connector.converters.DebeziumConverter;
 import com.altinity.clickhouse.sink.connector.db.ClickHouseDbConstants;
 import com.altinity.clickhouse.sink.connector.db.DBMetadata;
@@ -11,6 +12,7 @@ import com.altinity.clickhouse.sink.connector.metadata.DataTypeRange;
 import com.altinity.clickhouse.sink.connector.model.ClickHouseStruct;
 import com.clickhouse.data.ClickHouseDataType;
 import com.google.common.annotations.VisibleForTesting;
+import io.debezium.data.VariableScaleDecimal;
 import org.apache.commons.lang3.tuple.MutablePair;
 import org.apache.kafka.connect.data.Field;
 import org.apache.kafka.connect.data.Struct;
@@ -143,7 +145,11 @@ public class ReplicationHistoryHandler {
             if (keyStruct == null || keyStruct.schema().field(column) == null || keyStruct.get(column) == null) {
                 throw new IllegalArgumentException("Missing replication history primary-key value for " + column);
             }
-            primaryKeyValues.put(column, keyStruct.get(column));
+            Object value = keyStruct.get(column);
+            if (VariableScaleDecimal.LOGICAL_NAME.equals(keyStruct.schema().field(column).schema().name())) {
+                value = ClickHouseDataTypeMapper.variableScaleDecimalValue((Struct) value);
+            }
+            primaryKeyValues.put(column, value);
         }
 
         return new UpdateQueryParams(
@@ -277,7 +283,8 @@ public class ReplicationHistoryHandler {
                         config,
                         columnToDataTypeMap,
                         engine,
-                        tableName
+                        tableName,
+                        true
                 );
             }
 

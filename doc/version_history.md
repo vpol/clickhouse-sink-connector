@@ -352,6 +352,10 @@ clickhouse.datetime.timezone=America/Chicago
 
 Temporal UPDATE and DELETE lookups match every column of the source primary key.
 Tables must have a primary key, and change events must contain all its values.
+PostgreSQL unconstrained `numeric` keys are decoded from Debezium's variable-scale
+decimal representation using the same conversion as row writes. Decimal key
+predicates and temporal after-image expressions use exact typed decimal strings,
+preserving precision during both lookups and writes.
 History writes use the same event version sequence as normal inserts, so a later
 re-insert can supersede a deletion marker. PostgreSQL validity timestamps use the
 source timestamp in milliseconds, with the envelope read time for snapshots.

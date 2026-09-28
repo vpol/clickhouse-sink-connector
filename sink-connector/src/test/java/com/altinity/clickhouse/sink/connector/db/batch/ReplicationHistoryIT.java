@@ -6,6 +6,8 @@ import com.altinity.clickhouse.sink.connector.db.DBMetadata;
 import com.altinity.clickhouse.sink.connector.model.BlockMetaData;
 import com.altinity.clickhouse.sink.connector.model.ClickHouseStruct;
 import com.clickhouse.jdbc.ClickHouseDataSource;
+import io.debezium.data.VariableScaleDecimal;
+import org.apache.kafka.connect.data.Decimal;
 import org.apache.commons.lang3.tuple.MutablePair;
 import org.apache.kafka.connect.data.Schema;
 import org.apache.kafka.connect.data.SchemaBuilder;
@@ -17,6 +19,7 @@ import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
 
 import java.sql.Connection;
+import java.math.BigDecimal;
 import java.time.ZoneId;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
@@ -72,6 +75,49 @@ class ReplicationHistoryIT {
             assertEquals(1, count(connection, "account_id='account-A' AND _operation='D' AND `" + deleteColumn + "`=1"
                     + (businessFlag ? " AND is_deleted=1" : "")));
             if (businessFlag) assertEquals(0, count(connection, "is_deleted!=1"));
+        }
+    }
+
+    @ParameterizedTest
+    @ValueSource(booleans = {true, false})
+    void uuidAndDecimalKeysKeepExactValuesInPredicatesAndAfterImages(boolean variableScale) throws Exception {
+        String uuid = "12345678-1234-1234-1234-123456789abc";
+        BigDecimal a = new BigDecimal("9007199254740993.000000000000000001");
+        BigDecimal b = new BigDecimal("9007199254740993.000000000000000002");
+        String decimalType = variableScale ? "Decimal(64,18)" : "Decimal(38,18)";
+        var config = new ClickHouseSinkConnectorConfig(Map.of("replication.history.enable", "true",
+                "replacingmergetree.delete.column", "_is_deleted"));
+        Map<String, String> columns = new LinkedHashMap<>();
+        columns.put("organisation_id", "UUID"); columns.put("account_id", decimalType); columns.put("name", "String");
+        columns.put("_valid_from", "DateTime"); columns.put("_valid_to", "DateTime");
+        columns.put("_operation", "String"); columns.put("_version", "UInt64"); columns.put("_is_deleted", "UInt8");
+        Schema schema = SchemaBuilder.struct().field("organisation_id", Schema.STRING_SCHEMA)
+                .field("account_id", variableScale ? VariableScaleDecimal.schema() : Decimal.schema(18))
+                .field("name", Schema.STRING_SCHEMA).build();
+        Object key = variableScale ? new Struct(VariableScaleDecimal.schema())
+                .put("scale", a.scale()).put("value", a.unscaledValue().toByteArray()) : a;
+        Struct before = new Struct(schema).put("organisation_id", uuid).put("account_id", key).put("name", "Alice");
+        Struct after = new Struct(schema).put("organisation_id", uuid).put("account_id", key).put("name", "Alicia");
+        try (Connection connection = new ClickHouseDataSource(CLICKHOUSE.getJdbcUrl())
+                .getConnection(CLICKHOUSE.getUsername(), CLICKHOUSE.getPassword())) {
+            connection.createStatement().execute("DROP TABLE IF EXISTS accounts");
+            connection.createStatement().execute("CREATE TABLE accounts (" + columns.entrySet().stream()
+                    .map(c -> "`" + c.getKey() + "` " + c.getValue()).collect(java.util.stream.Collectors.joining(","))
+                    + ") ENGINE=ReplacingMergeTree(_version,_is_deleted) ORDER BY (organisation_id,account_id,_valid_to)");
+            connection.createStatement().execute("SYSTEM STOP MERGES accounts");
+            connection.createStatement().execute("INSERT INTO accounts VALUES "
+                    + "('" + uuid + "','" + a + "','Alice','2026-01-01','2100-01-01','C',1,0),"
+                    + "('" + uuid + "','" + b + "','Bob','2026-01-01','2100-01-01','C',1,0)");
+            String keyA = "account_id=CAST('" + a + "','" + decimalType + "')";
+            String keyB = "account_id=CAST('" + b + "','" + decimalType + "')";
+            execute(connection, config, columns, "_is_deleted", record(before, after, CDC_OPERATION.UPDATE, 1789992000L));
+            assertEquals(1, count(connection, keyA + " AND name='Alicia' AND _is_deleted=0"));
+            assertEquals(0, count(connection, "NOT (" + keyA + " OR " + keyB + ")"), "UPDATE rounded a decimal key");
+            assertEquals(1, count(connection, keyB));
+            execute(connection, config, columns, "_is_deleted", record(after, null, CDC_OPERATION.DELETE, 1789992060L));
+            assertEquals(1, count(connection, keyA + " AND _operation='D' AND _is_deleted=1"));
+            assertEquals(1, count(connection, keyB + " AND name='Bob' AND _version=1"));
+            assertEquals(1, count(connection, keyB));
         }
     }
 
